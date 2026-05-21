@@ -1,0 +1,41 @@
+import type { Metadata } from "next";
+import { Source_Serif_4, Inter_Tight, JetBrains_Mono } from "next/font/google";
+import "./globals.css";
+
+const sourceSerif4 = Source_Serif_4({
+  variable: "--font-source-serif-4",
+  subsets: ["latin"],
+  weight: "variable",
+  axes: ["opsz"],
+});
+
+const interTight = Inter_Tight({
+  variable: "--font-inter-tight",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+});
+
+export const metadata: Metadata = {
+  title: "CampSearch — California Campsite Availability Monitoring",
+  description:
+    "Get notified the second a campsite opens up. CampSearch watches 138 California campgrounds and pings you the moment a site matching your criteria becomes available.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html
+      lang="en"
+      className={`${sourceSerif4.variable} ${interTight.variable} ${jetbrainsMono.variable} h-full`}
+    >
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
