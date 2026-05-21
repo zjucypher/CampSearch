@@ -312,3 +312,60 @@ a { color: inherit; text-decoration: none; }
 }
 .cs-switch[data-checked="true"] { background: var(--primary); }
 .cs-switch[data-checked="true"]::after { transform: translateX(16px); }
+
+/* ── Utility classes ───────────────────────────────────────────────────── */
+.cs-muted  { color: var(--muted); }
+.cs-mono   { font-family: var(--font-mono); }
+
+.cs-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+/* Calendar */
+.cs-cal-h  {
+  text-align: center;
+  padding: 4px 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.cs-cal-d  {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.cs-cal-d:hover:not(.cs-cal-d--out) { background: var(--surface-2); }
+.cs-cal-d--out   { color: var(--muted); opacity: 0.4; cursor: default; }
+.cs-cal-d--avail { color: var(--success); font-weight: 600; }
+.cs-cal-d--start { background: var(--primary); color: var(--primary-ink); border-radius: 99px 0 0 99px; }
+.cs-cal-d--end   { background: var(--primary); color: var(--primary-ink); border-radius: 0 99px 99px 0; }
+.cs-cal-d--mid   { background: color-mix(in oklch, var(--primary) 14%, var(--surface)); border-radius: 0; }
+
+/* Sparkline */
+.cs-spark  { width: 100%; height: 32px; display: block; }
+
+/* Email preview container */
+.cs-email  {
+  background: #ffffff;
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: Georgia, serif;
+  max-width: 600px;
+}
+
+/* Nav links */
+.cs-nav-links { display: flex; align-items: center; gap: 28px; }
+.cs-nav-links a { font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
+.cs-nav-links a:hover { color: var(--ink); }
+.cs-nav-links a.active { color: var(--ink); font-weight: 500; }
