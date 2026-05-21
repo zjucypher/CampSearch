@@ -44,8 +44,16 @@ export async function proxy(request: NextRequest) {
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();
-    url.pathname = "/signup";
+    url.pathname = "/login";
     url.searchParams.set("next", pathname);
+    return NextResponse.redirect(url);
+  }
+
+  // Redirect already-logged-in users away from auth pages
+  if (user && (pathname === "/login" || pathname === "/signup")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.searchParams.delete("next");
     return NextResponse.redirect(url);
   }
 

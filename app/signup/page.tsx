@@ -2,16 +2,75 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Nav from "@/components/cs/Nav";
 import Icon from "@/components/cs/Icon";
 import TopoBg from "@/components/cs/TopoBg";
 import CsSwitch from "@/components/cs/CsSwitch";
+import { createBrowserClient } from "@supabase/ssr";
+import type { Database } from "@/lib/supabase/types";
+
+function getSupabase() {
+  return createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
 
 export default function SignupPage() {
+  const router = useRouter();
   const [step, setStep] = useState(1);
-  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
   const [sms, setSms] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleStep1() {
+    if (!name.trim() || !email.trim() || !password.trim()) {
+      setError("Please fill in all fields.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    setError(null);
+    setStep(2);
+  }
+
+  async function handleSignup() {
+    setLoading(true);
+    setError(null);
+
+    const supabase = getSupabase();
+    const { error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name, phone: sms ? phone : undefined },
+        emailRedirectTo: `${location.origin}/auth/callback?next=/search`,
+      },
+    });
+
+    if (signUpError) {
+      setError(signUpError.message);
+      setLoading(false);
+      return;
+    }
+
+    router.push("/search");
+  }
+
+  async function handleGoogle() {
+    const supabase = getSupabase();
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${location.origin}/auth/callback?next=/search` },
+    });
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
@@ -26,6 +85,16 @@ export default function SignupPage() {
           justifyContent: "center",
         }}>
           <div className="cs-label" style={{ marginBottom: 12 }}>Step {step} of 2</div>
+
+          {error && (
+            <div style={{
+              padding: "10px 14px", marginBottom: 16, borderRadius: 4,
+              background: "color-mix(in oklch, var(--accent) 12%, transparent)",
+              color: "var(--accent)", fontSize: 13, border: "1px solid color-mix(in oklch, var(--accent) 30%, transparent)",
+            }}>
+              {error}
+            </div>
+          )}
 
           {step === 1 ? (
             <>
@@ -44,10 +113,10 @@ export default function SignupPage() {
                 </div>
                 <div>
                   <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Password</label>
-                  <input className="cs-input" type="password" placeholder="••••••••••" />
+                  <input className="cs-input" type="password" placeholder="••••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
               </div>
-              <button className="cs-btn cs-btn--lg" onClick={() => setStep(2)} style={{ width: "100%" }}>
+              <button className="cs-btn cs-btn--lg" onClick={handleStep1} style={{ width: "100%" }}>
                 Continue <Icon name="arrow" size={16} />
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "20px 0", color: "var(--muted)", fontSize: 12 }}>
@@ -55,12 +124,12 @@ export default function SignupPage() {
                 <span>or</span>
                 <hr className="cs-divider" style={{ flex: 1 }} />
               </div>
-              <button className="cs-btn cs-btn--ghost" style={{ width: "100%" }}>
+              <button className="cs-btn cs-btn--ghost" style={{ width: "100%" }} onClick={handleGoogle}>
                 Continue with Google
               </button>
               <p className="cs-muted" style={{ marginTop: 24, fontSize: 12.5 }}>
                 Already have an account?{" "}
-                <Link href="/dashboard" style={{ color: "var(--ink)", textDecoration: "underline" }}>Sign in</Link>
+                <Link href="/login" style={{ color: "var(--ink)", textDecoration: "underline" }}>Sign in</Link>
               </p>
             </>
           ) : (
@@ -78,7 +147,7 @@ export default function SignupPage() {
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}><Icon name="mail" size={16} /></div>
                     <div>
-                      <div style={{ fontWeight: 600 }}>Email · {email || "jordan@example.com"}</div>
+                      <div style={{ fontWeight: 600 }}>Email · {email}</div>
                       <div className="cs-muted" style={{ fontSize: 12 }}>Free · unlimited</div>
                     </div>
                   </div>
@@ -98,16 +167,23 @@ export default function SignupPage() {
                   </div>
                   <CsSwitch on={sms} onChange={setSms} />
                 </div>
-                <div>
-                  <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Phone (optional)</label>
-                  <input className="cs-input" placeholder="(415) 555-0142" />
-                </div>
+                {sms && (
+                  <div>
+                    <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Phone number</label>
+                    <input className="cs-input" placeholder="(415) 555-0142" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button className="cs-btn cs-btn--ghost" onClick={() => setStep(1)}>Back</button>
-                <Link href="/search" className="cs-btn cs-btn--lg" style={{ flex: 1, justifyContent: "center" }}>
-                  Start your first alert <Icon name="arrow" size={16} />
-                </Link>
+                <button
+                  className="cs-btn cs-btn--lg"
+                  style={{ flex: 1, justifyContent: "center" }}
+                  onClick={handleSignup}
+                  disabled={loading}
+                >
+                  {loading ? "Creating account…" : <>Start your first alert <Icon name="arrow" size={16} /></>}
+                </button>
               </div>
             </>
           )}

@@ -60,7 +60,7 @@ export default function Nav({ signedIn = false, current }: Props) {
           </>
         ) : (
           <>
-            <Link href="/signup" className="cs-btn cs-btn--quiet cs-btn--sm">Sign in</Link>
+            <Link href="/login" className="cs-btn cs-btn--quiet cs-btn--sm">Sign in</Link>
             <Link href="/signup" className="cs-btn cs-btn--sm">Get started</Link>
           </>
         )}
