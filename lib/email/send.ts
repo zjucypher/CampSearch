@@ -85,7 +85,7 @@ export async function sendHitEmail(p: HitEmailPayload) {
 </html>`;
 
   return getResend().emails.send({
-    from: "CampSearch <alerts@campsearch.app>",
+    from: process.env.RESEND_FROM_EMAIL ?? "CampSearch <onboarding@resend.dev>",
     to: p.to,
     subject: `🏕 Site found — ${p.campgroundName} ${p.siteName}`,
     html,

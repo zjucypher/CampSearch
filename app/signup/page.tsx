@@ -27,6 +27,7 @@ export default function SignupPage() {
   const [sms, setSms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkEmail, setCheckEmail] = useState(false);
 
   async function handleStep1() {
     if (!name.trim() || !email.trim() || !password.trim()) {
@@ -46,7 +47,7 @@ export default function SignupPage() {
     setError(null);
 
     const supabase = getSupabase();
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -58,6 +59,14 @@ export default function SignupPage() {
     if (signUpError) {
       setError(signUpError.message);
       setLoading(false);
+      return;
+    }
+
+    setLoading(false);
+
+    if (!data.session) {
+      // Email confirmation required — Supabase sent a verification email
+      setCheckEmail(true);
       return;
     }
 
@@ -96,7 +105,16 @@ export default function SignupPage() {
             </div>
           )}
 
-          {step === 1 ? (
+          {checkEmail ? (
+            <div style={{ textAlign: "center", paddingTop: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 16 }}>📬</div>
+              <h2 style={{ fontSize: 26, marginBottom: 12 }}>Check your email</h2>
+              <p className="cs-muted" style={{ fontSize: 14 }}>
+                We sent a confirmation link to <strong>{email}</strong>.<br />
+                Click it to activate your account and start your first alert.
+              </p>
+            </div>
+          ) : step === 1 ? (
             <>
               <h1 style={{ fontSize: 38, marginBottom: 10 }}>Create your account</h1>
               <p className="cs-muted" style={{ marginBottom: 28, fontSize: 14.5 }}>
