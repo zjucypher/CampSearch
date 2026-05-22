@@ -1,23 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import Nav from "@/components/cs/Nav";
 import Icon from "@/components/cs/Icon";
-import MapPlaceholder from "@/components/cs/MapPlaceholder";
 import Photo from "@/components/cs/Photo";
-import { campgrounds } from "@/lib/data";
+import type { MapCampground } from "@/components/cs/CampMap";
+
+const CampMap = dynamic(() => import("@/components/cs/CampMap"), { ssr: false });
+
+type Campground = MapCampground & {
+  agency: string;
+  site_count: number;
+  amenities: string[];
+  photo_url: string | null;
+};
+
+function formatAmenity(a: string) {
+  return a.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function AgencyBadge({ agency }: { agency: string }) {
+  const labels: Record<string, string> = { NPS: "National Park", "CA-SP": "State Park", USFS: "National Forest" };
+  return <span className="cs-pill cs-pill--muted" style={{ fontSize: 10.5 }}>{labels[agency] ?? agency}</span>;
+}
 
 export default function SearchPage() {
-  const [active, setActive] = useState(campgrounds[0].id);
+  const [campgrounds, setCampgrounds] = useState<Campground[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [active, setActive] = useState<string | undefined>(undefined);
   const [view, setView] = useState<"split" | "list" | "map">("split");
   const [q, setQ] = useState("");
 
-  const filtered = campgrounds.filter(
-    (c) => !q || (c.name + c.park + c.region).toLowerCase().includes(q.toLowerCase())
-  );
+  const fetchCampgrounds = useCallback((query: string) => {
+    setLoading(true);
+    fetch(`/api/campgrounds?q=${encodeURIComponent(query)}&limit=30`)
+      .then((r) => r.json())
+      .then((data) => {
+        const list: Campground[] = data.campgrounds ?? [];
+        setCampgrounds(list);
+        setActive((prev) => list.find((c) => c.id === prev) ? prev : list[0]?.id);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
-  const activeC = filtered.find((c) => c.id === active) ?? filtered[0];
+  // Initial load
+  useEffect(() => { fetchCampgrounds(""); }, [fetchCampgrounds]);
+
+  // Debounced search
+  useEffect(() => {
+    if (!q) return;
+    const t = setTimeout(() => fetchCampgrounds(q), 300);
+    return () => clearTimeout(t);
+  }, [q, fetchCampgrounds]);
+
+  const activeC = campgrounds.find((c) => c.id === active);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
@@ -39,7 +77,7 @@ export default function SearchPage() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        {[["Region", "California"], ["Site type", "Tent or RV"], ["Dates", "Jul 18 — Jul 20"], ["Party", "2 adults"]].map(([lbl, val]) => (
+        {[["Site type", "Tent or RV"], ["Dates", "Jul 18 — Jul 20"], ["Party", "2 adults"]].map(([lbl, val]) => (
           <button key={lbl} className="cs-btn cs-btn--ghost cs-btn--sm">
             <span className="cs-muted" style={{ marginRight: 6 }}>{lbl}:</span>
             <span>{val}</span>
@@ -70,57 +108,69 @@ export default function SearchPage() {
         flex: 1, display: "grid", overflow: "hidden",
         gridTemplateColumns: view === "split" ? "1fr 1.1fr" : view === "list" ? "1fr" : "0 1fr",
       }}>
-        {/* List */}
+        {/* List panel */}
         {view !== "map" && (
           <div style={{ overflow: "auto", borderRight: view === "split" ? "1px solid var(--border)" : "none" }}>
             <div style={{ padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 500 }}>
-                  {filtered.length} campgrounds
+                  {loading ? "…" : `${campgrounds.length} campgrounds`}
                 </div>
-                <div className="cs-muted" style={{ fontSize: 12.5 }}>Sorted by cancellation rate · last 30 days</div>
+                <div className="cs-muted" style={{ fontSize: 12.5 }}>California · sorted by activity</div>
               </div>
               <button className="cs-btn cs-btn--quiet cs-btn--sm">
-                Sort: Cancellation rate <Icon name="chevronDown" size={12} />
+                Sort: Activity <Icon name="chevronDown" size={12} />
               </button>
             </div>
-            <div style={{ display: "grid", gap: 12, padding: "0 28px 28px" }}>
-              {filtered.map((c) => (
-                <button key={c.id} onClick={() => setActive(c.id)}
-                  className="cs-card"
-                  style={{
-                    padding: 0, textAlign: "left", cursor: "pointer",
-                    display: "grid", gridTemplateColumns: "140px 1fr", gap: 16,
-                    background: active === c.id ? "var(--surface-2)" : "var(--surface)",
-                    outline: active === c.id ? "2px solid var(--primary)" : "none",
-                    outlineOffset: -2, overflow: "hidden", border: "1px solid var(--border)",
-                  }}>
-                  <Photo label={c.id} height="100%" style={{ borderRadius: 0, border: "none" }} />
-                  <div style={{ padding: "14px 16px 14px 0" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                      <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 500 }}>{c.name}</div>
-                      <span className="cs-pill cs-pill--accent" style={{ fontSize: 10.5 }}>
-                        <Icon name="flame" size={10} strokeWidth={2.2} /> {c.cancellations}/mo
-                      </span>
+
+            {loading ? (
+              <div style={{ display: "grid", gap: 12, padding: "0 28px 28px" }}>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="cs-card" style={{ height: 100, opacity: 0.4, animation: "pulse 1.5s infinite" }} />
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 12, padding: "0 28px 28px" }}>
+                {campgrounds.map((c) => (
+                  <button key={c.id} onClick={() => setActive(c.id)}
+                    className="cs-card"
+                    style={{
+                      padding: 0, textAlign: "left", cursor: "pointer",
+                      display: "grid", gridTemplateColumns: "120px 1fr", gap: 0,
+                      background: active === c.id ? "var(--surface-2)" : "var(--surface)",
+                      outline: active === c.id ? "2px solid var(--primary)" : "none",
+                      outlineOffset: -2, overflow: "hidden", border: "1px solid var(--border)",
+                    }}>
+                    <Photo label={c.id} height="100%" style={{ borderRadius: 0, border: "none" }} />
+                    <div style={{ padding: "14px 16px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
+                        <div style={{ fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 500 }}>{c.name}</div>
+                        <AgencyBadge agency={c.agency} />
+                      </div>
+                      <div className="cs-muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{c.park}</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {c.amenities.slice(0, 3).map((a) => (
+                          <span key={a} className="cs-pill" style={{ fontSize: 10.5 }}>{formatAmenity(a)}</span>
+                        ))}
+                        <span className="cs-pill cs-pill--muted" style={{ fontSize: 10.5 }}>{c.site_count} sites</span>
+                      </div>
                     </div>
-                    <div className="cs-muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{c.park} · {c.region}</div>
-                    <div className="cs-muted" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.45 }}>{c.desc}</div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {c.tags.map((t) => <span key={t} className="cs-pill" style={{ fontSize: 10.5 }}>{t}</span>)}
-                      <span className="cs-pill cs-pill--muted" style={{ fontSize: 10.5 }}>{c.sites} sites</span>
-                      <span className="cs-pill cs-pill--muted" style={{ fontSize: 10.5 }}>{c.elevation}</span>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Map + active card */}
         {view !== "list" && (
           <div style={{ padding: 28, overflow: "auto" }}>
-            <MapPlaceholder campgrounds={filtered} activeId={active} onSelect={setActive} height={460} />
+            <CampMap
+              campgrounds={campgrounds}
+              activeId={active}
+              onSelect={setActive}
+              height={460}
+            />
             {activeC && (
               <div className="cs-card" style={{ marginTop: 18, padding: 20 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -135,13 +185,16 @@ export default function SearchPage() {
                     </Link>
                   </div>
                 </div>
-                <p className="cs-muted" style={{ fontSize: 13.5, marginBottom: 16, maxWidth: 540 }}>{activeC.desc}</p>
                 <div style={{
-                  display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 18,
+                  display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 18,
                   padding: "16px 0 0", borderTop: "1px solid var(--border)",
                 }}>
-                  {[["Sites", activeC.sites], ["Elevation", activeC.elevation], ["Cancellations / mo", activeC.cancellations], ["Region", activeC.region]].map(([k, v]) => (
-                    <div key={k}>
+                  {[
+                    ["Sites", activeC.site_count],
+                    ["Type", activeC.agency === "NPS" ? "National Park" : activeC.agency === "CA-SP" ? "State Park" : "National Forest"],
+                    ["Amenities", `${activeC.amenities.length} features`],
+                  ].map(([k, v]) => (
+                    <div key={k as string}>
                       <div className="cs-label" style={{ marginBottom: 4 }}>{k}</div>
                       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500 }}>{v}</div>
                     </div>

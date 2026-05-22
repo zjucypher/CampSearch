@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import Nav from "@/components/cs/Nav";
@@ -9,16 +9,66 @@ import Photo from "@/components/cs/Photo";
 import TopoBg from "@/components/cs/TopoBg";
 import Sparkline from "@/components/cs/Sparkline";
 import Calendar from "@/components/cs/Calendar";
-import { campgrounds, sites, calendar } from "@/lib/data";
+import { sites, calendar } from "@/lib/data";
+import type { Database } from "@/lib/supabase/types";
+
+type Campground = Database["public"]["Tables"]["campgrounds"]["Row"];
+
+function formatAmenity(a: string) {
+  return a.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function AgencyLabel({ agency }: { agency: string }) {
+  const map: Record<string, string> = {
+    NPS: "National Park Service",
+    "CA-SP": "California State Parks",
+    USFS: "US Forest Service",
+  };
+  return <>{map[agency] ?? agency}</>;
+}
 
 export default function CampgroundDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const c = campgrounds.find((x) => x.id === id) ?? campgrounds[0];
+  const [campground, setCampground] = useState<Campground | null>(null);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<number[]>([14, 15, 22]);
   const [tab, setTab] = useState<"sites" | "availability" | "info">("sites");
 
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/campgrounds/${id}`)
+      .then((r) => r.json())
+      .then((data) => setCampground(data.campground ?? null))
+      .finally(() => setLoading(false));
+  }, [id]);
+
   const toggle = (n: number) =>
     setSelected((s) => (s.includes(n) ? s.filter((x) => x !== n) : [...s, n]));
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <Nav signedIn={true} current="search" />
+        <div style={{ maxWidth: 1200, margin: "0 auto", width: "100%", padding: "32px" }}>
+          <div style={{ height: 300, background: "var(--surface-2)", borderRadius: "var(--cs-radius-lg)", opacity: 0.5 }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!campground) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <Nav signedIn={true} current="search" />
+        <div style={{ maxWidth: 1200, margin: "0 auto", width: "100%", padding: "64px 32px", textAlign: "center" }}>
+          <h2 style={{ fontSize: 28, marginBottom: 12 }}>Campground not found</h2>
+          <Link href="/search" className="cs-btn">Back to search</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const c = campground;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
@@ -46,9 +96,11 @@ export default function CampgroundDetailPage() {
         {/* Title block */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
           <div>
-            <div className="cs-label" style={{ marginBottom: 8 }}>{c.park} · {c.region}</div>
+            <div className="cs-label" style={{ marginBottom: 8 }}>{c.park} · <AgencyLabel agency={c.agency} /></div>
             <h1 style={{ fontSize: 44, marginBottom: 12 }}>{c.name}</h1>
-            <p className="cs-muted" style={{ maxWidth: 580, fontSize: 14.5 }}>{c.desc}</p>
+            {c.description && (
+              <p className="cs-muted" style={{ maxWidth: 580, fontSize: 14.5 }}>{c.description}</p>
+            )}
           </div>
           <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
             <button className="cs-btn cs-btn--ghost"><Icon name="bell" size={14} /> Watch campground</button>
@@ -65,11 +117,11 @@ export default function CampgroundDetailPage() {
         {/* Stat strip */}
         <div className="cs-card" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", padding: 0, marginBottom: 28, overflow: "hidden" }}>
           {([
-            ["Sites", c.sites, null],
-            ["Elevation", c.elevation, null],
-            ["Cancellations / mo", c.cancellations, [3,5,2,4,6,8,5,7,9,11,8,12,9]],
+            ["Sites", c.site_count, null],
+            ["Operator", c.agency, null],
+            ["Amenities", `${c.amenities.length} features`, null],
             ["Avg. lead time", "21 days", null],
-            ["Booking opens", "5 mo ahead", null],
+            ["Booking opens", "5 mo ahead", [3, 5, 2, 4, 6, 8, 5, 7, 9, 11, 8, 12, 9]],
           ] as [string, string | number, number[] | null][]).map(([k, v, spark], i) => (
             <div key={k} style={{ padding: "16px 18px", borderLeft: i === 0 ? "none" : "1px solid var(--border)" }}>
               <div className="cs-label" style={{ marginBottom: 6 }}>{k}</div>
@@ -100,9 +152,9 @@ export default function CampgroundDetailPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
                 <h3 style={{ fontSize: 20 }}>Site map</h3>
                 <div style={{ display: "flex", gap: 14, fontSize: 11.5 }}>
-                  {[["Available", "var(--success)"], ["Watched", "var(--accent)"], ["Selected", "var(--ink)"], ["Taken", "var(--border-strong)"]].map(([l, c]) => (
+                  {[["Available", "var(--success)"], ["Watched", "var(--accent)"], ["Selected", "var(--ink)"], ["Taken", "var(--border-strong)"]].map(([l, color]) => (
                     <span key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <span className="cs-dot" style={{ background: c }} /> {l}
+                      <span className="cs-dot" style={{ background: color }} /> {l}
                     </span>
                   ))}
                 </div>
@@ -187,10 +239,10 @@ export default function CampgroundDetailPage() {
             <div>
               <h3 style={{ fontSize: 20, marginBottom: 12 }}>Cancellation timing</h3>
               <p className="cs-muted" style={{ fontSize: 13.5, marginBottom: 16 }}>
-                When sites at {c.name} have dropped in the last 30 days. Most happen 3–10 days out.
+                When sites at {c.name} typically drop. Most happen 3–10 days before arrival.
               </p>
               <div className="cs-card" style={{ padding: 18 }}>
-                <Sparkline data={[2,1,3,4,2,5,7,9,11,8,12,9,7,6,4,3,5,2]} />
+                <Sparkline data={[2, 1, 3, 4, 2, 5, 7, 9, 11, 8, 12, 9, 7, 6, 4, 3, 5, 2]} />
                 <div className="cs-mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
                   <span>14 days out</span><span>arrival</span>
                 </div>
@@ -201,21 +253,40 @@ export default function CampgroundDetailPage() {
 
         {tab === "info" && (
           <div style={{ paddingBottom: 48, maxWidth: 680 }}>
-            <p style={{ fontSize: 15.5, lineHeight: 1.7, marginBottom: 16 }}>{c.desc}</p>
+            {c.description && (
+              <p style={{ fontSize: 15.5, lineHeight: 1.7, marginBottom: 20 }}>{c.description}</p>
+            )}
+            <div style={{ marginBottom: 24 }}>
+              <h4 style={{ fontFamily: "var(--font-display)", fontSize: 16, marginBottom: 10 }}>Amenities</h4>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {c.amenities.map((a) => (
+                  <span key={a} className="cs-pill" style={{ fontSize: 12 }}>{formatAmenity(a)}</span>
+                ))}
+              </div>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 20 }}>
               {[
-                ["Operator", "Recreation.gov"],
+                ["Operator", <AgencyLabel key="op" agency={c.agency} />],
+                ["Reservation system", "Recreation.gov"],
                 ["Reservation window", "5 months ahead, rolling"],
                 ["Check-in", "12:00 PM"],
                 ["Pets", "Allowed on leash"],
-                ["Cell coverage", "Spotty (Verizon best)"],
-                ["Nearest store", "Yosemite Village · 4 mi"],
+                ["Total sites", c.site_count],
               ].map(([k, v]) => (
-                <div key={k} style={{ paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+                <div key={k as string} style={{ paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
                   <div className="cs-label" style={{ marginBottom: 4 }}>{k}</div>
                   <div style={{ fontSize: 14 }}>{v}</div>
                 </div>
               ))}
+              {c.booking_url && (
+                <div style={{ paddingBottom: 12, borderBottom: "1px solid var(--border)", gridColumn: "span 2" }}>
+                  <div className="cs-label" style={{ marginBottom: 4 }}>Book directly</div>
+                  <a href={c.booking_url} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 14, color: "var(--primary)", textDecoration: "underline" }}>
+                    Recreation.gov →
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         )}
