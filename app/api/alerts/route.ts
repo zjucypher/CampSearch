@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { Database } from "@/lib/supabase/types";
+import { PLAN_LIMITS } from "@/lib/stripe";
 
 async function getSupabase() {
   const cookieStore = await cookies();
@@ -45,7 +46,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Enforce plan limits
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: profileRow } = await (supabase.from("profiles") as any).select("plan").eq("id", user.id).single();
+  const plan = ((profileRow as { plan?: string } | null)?.plan ?? "free") as keyof typeof PLAN_LIMITS;
+  const limits = PLAN_LIMITS[plan];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { count } = await (supabase.from("alerts") as any).select("*", { count: "exact", head: true })
+    .eq("user_id", user.id).eq("status", "monitoring");
+
+  if ((count ?? 0) >= limits.maxAlerts) {
+    return NextResponse.json(
+      { error: `Your ${plan} plan allows ${limits.maxAlerts} active alert${limits.maxAlerts === 1 ? "" : "s"}. Upgrade to add more.` },
+      { status: 403 }
+    );
+  }
+
   const body = await request.json();
+
+  // Enforce minimum poll interval for plan
+  const requestedInterval = body.poll_interval ?? 60;
+  const safeInterval = Math.max(requestedInterval, limits.minInterval);
 
   const insert: Database["public"]["Tables"]["alerts"]["Insert"] = {
     user_id: user.id,
@@ -64,7 +86,7 @@ export async function POST(request: NextRequest) {
     channel_email: body.channel_email ?? true,
     channel_sms: body.channel_sms ?? false,
     channel_push: body.channel_push ?? false,
-    poll_interval: body.poll_interval ?? 60,
+    poll_interval: safeInterval as 30 | 60 | 300 | 1800,
     status: "monitoring",
   };
 

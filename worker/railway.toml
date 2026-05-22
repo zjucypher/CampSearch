@@ -1,0 +1,8 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "worker/Dockerfile"
+
+[deploy]
+startCommand = "python main.py"
+restartPolicyType = "always"
+healthcheckPath = ""

@@ -22,9 +22,25 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CampSearch — California Campsite Availability Monitoring",
+  title: {
+    default: "CampSearch — California Campsite Availability Monitoring",
+    template: "%s · CampSearch",
+  },
   description:
-    "Get notified the second a campsite opens up. CampSearch watches 138 California campgrounds and pings you the moment a site matching your criteria becomes available.",
+    "Get notified the second a campsite opens up. CampSearch watches California campgrounds across Yosemite, Big Sur, Tahoe, and more — and pings you the moment a site opens.",
+  keywords: ["campsite availability", "recreation.gov alert", "yosemite camping", "california camping", "campsite monitor"],
+  openGraph: {
+    title: "CampSearch — California Campsite Availability Monitoring",
+    description: "Stop refreshing Recreation.gov. CampSearch watches for you and fires the moment a site opens.",
+    siteName: "CampSearch",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CampSearch",
+    description: "California campsite availability monitoring. Get notified in seconds.",
+  },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({

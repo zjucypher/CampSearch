@@ -1,30 +1,89 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Nav from "@/components/cs/Nav";
 import Icon from "@/components/cs/Icon";
 import FormGroup from "@/components/cs/FormGroup";
 import CsSwitch from "@/components/cs/CsSwitch";
-import { campgrounds } from "@/lib/data";
+import type { Database } from "@/lib/supabase/types";
 
 type Channels = { email: boolean; sms: boolean; push: boolean };
+type Campground = Database["public"]["Tables"]["campgrounds"]["Row"];
 
 export default function CreateAlertPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const c = campgrounds.find((x) => x.id === id) ?? campgrounds[0];
 
+  const [campground, setCampground] = useState<Campground | null>(null);
+  const [arriveDate, setArriveDate] = useState("2026-07-18");
+  const [departDate, setDepartDate] = useState("2026-07-20");
   const [flex, setFlex] = useState("exact");
   const [siteMode, setSiteMode] = useState<"specific" | "any">("specific");
   const [channels, setChannels] = useState<Channels>({ email: true, sms: true, push: false });
   const [freq, setFreq] = useState("60");
+  const [adults, setAdults] = useState("2");
+  const [kids, setKids] = useState("1");
+  const [vehicles, setVehicles] = useState("1");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/campgrounds/${id}`)
+      .then((r) => r.json())
+      .then((d) => setCampground(d.campground ?? null));
+  }, [id]);
+
+  const c = campground;
+
+  async function handleSubmit() {
+    if (!c) return;
+    setSubmitting(true);
+    setError(null);
+    const res = await fetch("/api/alerts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campground_id: c.id,
+        arrive_date: arriveDate,
+        depart_date: departDate,
+        flexibility: flex,
+        site_mode: siteMode,
+        site_ids: siteMode === "specific" ? [14, 15, 22] : [],
+        adults: parseInt(adults),
+        kids: parseInt(kids),
+        vehicles: parseInt(vehicles),
+        channel_email: channels.email,
+        channel_sms: channels.sms,
+        channel_push: channels.push,
+        poll_interval: parseInt(freq),
+      }),
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      setError(d.error ?? "Failed to create alert");
+      setSubmitting(false);
+      return;
+    }
+    router.push("/dashboard");
+  }
 
   const flexLabel: Record<string, string> = {
     exact: "Exact dates", "3d": "± 3 days", week: "Any week of July", wknd: "Weekends only",
   };
   const freqLabel: Record<string, string> = { "30": "30s", "60": "60s", "300": "5m", "1800": "30m" };
+
+  if (!c) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <Nav signedIn={true} current="search" />
+        <div style={{ maxWidth: 1080, margin: "80px auto", padding: 32 }}>
+          <div style={{ height: 200, background: "var(--surface-2)", borderRadius: "var(--cs-radius-lg)", opacity: 0.4 }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
@@ -38,6 +97,12 @@ export default function CreateAlertPage() {
           <span style={{ color: "var(--ink)" }}>Configure alert</span>
         </div>
 
+        {error && (
+          <div style={{ padding: "10px 14px", marginBottom: 20, borderRadius: 4, background: "color-mix(in oklch, var(--accent) 12%, transparent)", color: "var(--accent)", fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 40 }}>
           <div>
             <h1 style={{ fontSize: 38, marginBottom: 8 }}>Configure your alert</h1>
@@ -50,11 +115,11 @@ export default function CreateAlertPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
                 <div>
                   <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Arrive</label>
-                  <input className="cs-input" defaultValue="Sat, Jul 18, 2026" />
+                  <input className="cs-input" type="date" value={arriveDate} onChange={(e) => setArriveDate(e.target.value)} />
                 </div>
                 <div>
                   <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Depart</label>
-                  <input className="cs-input" defaultValue="Mon, Jul 20, 2026" />
+                  <input className="cs-input" type="date" value={departDate} onChange={(e) => setDepartDate(e.target.value)} />
                 </div>
               </div>
               <label className="cs-label" style={{ display: "block", marginBottom: 8 }}>Flexibility</label>
@@ -119,10 +184,10 @@ export default function CreateAlertPage() {
             {/* 03 Party */}
             <FormGroup num="03" title="Party" sub="Match sites that fit your group.">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                {[["Adults", "2"], ["Kids", "1"], ["Vehicles", "1"]].map(([k, v]) => (
+                {([["Adults", adults, setAdults], ["Kids", kids, setKids], ["Vehicles", vehicles, setVehicles]] as [string, string, (v: string) => void][]).map(([k, v, setter]) => (
                   <div key={k}>
                     <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>{k}</label>
-                    <input className="cs-input" defaultValue={v} />
+                    <input className="cs-input" type="number" min="0" value={v} onChange={(e) => setter(e.target.value)} />
                   </div>
                 ))}
               </div>
@@ -167,10 +232,10 @@ export default function CreateAlertPage() {
               <div className="cs-muted" style={{ fontSize: 12.5, marginBottom: 18 }}>{c.park}</div>
               <div style={{ display: "grid", gap: 12, fontSize: 13, marginBottom: 18 }}>
                 {[
-                  ["Dates", "Jul 18 – Jul 20, 2026"],
+                  ["Dates", `${arriveDate} – ${departDate}`],
                   ["Flexibility", flexLabel[flex]],
                   ["Sites", siteMode === "specific" ? "14, 15, 22 only" : "Any matching filters"],
-                  ["Party", "2 adults · 1 kid"],
+                  ["Party", `${adults} adults · ${kids} kid${parseInt(kids) !== 1 ? "s" : ""}`],
                   ["Channels", Object.entries(channels).filter(([, v]) => v).map(([k]) => k).join(", ").toUpperCase() || "—"],
                   ["Cadence", `Every ${freqLabel[freq]}`],
                 ].map(([k, v]) => (
@@ -180,8 +245,8 @@ export default function CreateAlertPage() {
                   </div>
                 ))}
               </div>
-              <button className="cs-btn cs-btn--lg" style={{ width: "100%" }} onClick={() => router.push("/dashboard")}>
-                <Icon name="bell" size={14} /> Start monitoring
+              <button className="cs-btn cs-btn--lg" style={{ width: "100%" }} onClick={handleSubmit} disabled={submitting}>
+                <Icon name="bell" size={14} /> {submitting ? "Saving…" : "Start monitoring"}
               </button>
               <p className="cs-muted" style={{ fontSize: 11.5, marginTop: 10, textAlign: "center" }}>
                 You can pause or edit this alert any time.

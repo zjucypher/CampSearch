@@ -137,10 +137,12 @@ create trigger profiles_updated_at
   for each row execute procedure update_updated_at();
 
 -- auto-create profile on sign-up
-create or replace function handle_new_user()
-returns trigger language plpgsql security definer as $$
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer
+set search_path = ''
+as $$
 begin
-  insert into profiles (id, full_name)
+  insert into public.profiles (id, full_name)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1))
