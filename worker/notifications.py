@@ -17,13 +17,13 @@ def send_email(alert: dict[str, Any], hit: dict[str, Any], user_email: str, user
     import resend
 
     resend.api_key = os.environ["RESEND_API_KEY"]
-    campground_name = alert.get("campground", {}).get("name", "Your campground")
+    campground_name = alert.get("campgrounds", {}).get("name", "Your campground")
     subject = f"🏕 Site found — {campground_name} {hit.get('site_name', '')}"
 
     html = _render_email_html(
         user_name=user_name,
         campground_name=campground_name,
-        park=alert.get("campground", {}).get("park", ""),
+        park=alert.get("campgrounds", {}).get("park", ""),
         site_name=hit.get("site_name", ""),
         arrive=hit["arrive_date"],
         depart=hit["depart_date"],
@@ -49,12 +49,12 @@ def send_sms(alert: dict[str, Any], hit: dict[str, Any], phone: str) -> bool:
     import os
     from twilio.rest import Client
 
-    if not os.environ.get("TWILIO_ACCOUNT_SID"):
+    if not (os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN") and os.environ.get("TWILIO_PHONE_NUMBER")):
         logger.info("Twilio not configured — skipping SMS for alert %s", alert["id"])
         return False
 
     client = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
-    campground_name = alert.get("campground", {}).get("name", "campground")
+    campground_name = alert.get("campgrounds", {}).get("name", "campground")
     booking_url = hit.get("booking_url", "https://www.recreation.gov")
     body = (
         f"🏕 CampSearch: {campground_name} {hit.get('site_name', '')} just opened "

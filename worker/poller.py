@@ -21,7 +21,7 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
     arrive = date.fromisoformat(alert["arrive_date"])
     depart = date.fromisoformat(alert["depart_date"])
     nights = (depart - arrive).days
-    rec_area_id = alert.get("campground", {}).get("rec_area_id")
+    rec_area_id = alert.get("campgrounds", {}).get("rec_area_id")
 
     if not rec_area_id:
         logger.warning("Alert %s has no rec_area_id — skipping", alert["id"])
@@ -74,5 +74,5 @@ def is_alert_due(alert: dict[str, Any]) -> bool:
     last_checked = alert.get("last_checked_at")
     if not last_checked:
         return True
-    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_checked)).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_checked.replace("Z", "+00:00"))).total_seconds()
     return elapsed >= alert["poll_interval"]

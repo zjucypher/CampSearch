@@ -76,6 +76,9 @@ def process_alert(db: Client, alert: dict) -> None:
     alert_id = alert["id"]
     user_id = alert["user_id"]
     profile = fetch_user_profile(db, user_id)
+    if not profile:
+        logger.warning("Skipping alert %s — could not fetch user profile, will retry next cycle", alert_id)
+        return
     campground = alert.get("campgrounds") or {}
 
     logger.info("Checking alert %s — %s", alert_id, campground.get("name", "?"))
@@ -104,7 +107,7 @@ def process_alert(db: Client, alert: dict) -> None:
     # Update alert state
     db.table("alerts").update({
         "status": "found",
-        "hits": alert["hits"] + 1,
+        "hits": (alert.get("hits") or 0) + 1,
         "last_hit_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", alert_id).execute()
 
