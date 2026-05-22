@@ -6,7 +6,7 @@ Called by main.py for each active alert that is due for a check.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -74,5 +74,5 @@ def is_alert_due(alert: dict[str, Any]) -> bool:
     last_checked = alert.get("last_checked_at")
     if not last_checked:
         return True
-    elapsed = (datetime.utcnow() - datetime.fromisoformat(last_checked.replace("Z", ""))).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_checked)).total_seconds()
     return elapsed >= alert["poll_interval"]

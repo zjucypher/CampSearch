@@ -36,18 +36,24 @@ def get_db() -> Client:
 
 
 def fetch_active_alerts(db: Client) -> list[dict]:
-    """Fetch monitoring alerts joined with campground and profile data."""
+    """Fetch monitoring alerts joined with campground data."""
     result = (
         db.table("alerts")
-        .select(
-            "*, "
-            "campgrounds(id, name, park, rec_area_id, booking_url), "
-            "profiles:user_id(id, full_name, phone, notify_email, notify_sms, plan)"
-        )
+        .select("*, campgrounds(id, name, park, rec_area_id, booking_url)")
         .eq("status", "monitoring")
         .execute()
     )
     return result.data or []
+
+
+def fetch_user_profile(db: Client, user_id: str) -> dict:
+    """Fetch profile row for a user."""
+    try:
+        result = db.table("profiles").select("*").eq("id", user_id).single().execute()
+        return result.data or {}
+    except Exception as exc:
+        logger.warning("Could not fetch profile for user %s: %s", user_id, exc)
+        return {}
 
 
 def fetch_user_email(db: Client, user_id: str) -> str | None:
@@ -69,7 +75,7 @@ def process_alert(db: Client, alert: dict) -> None:
 
     alert_id = alert["id"]
     user_id = alert["user_id"]
-    profile = alert.get("profiles") or {}
+    profile = fetch_user_profile(db, user_id)
     campground = alert.get("campgrounds") or {}
 
     logger.info("Checking alert %s — %s", alert_id, campground.get("name", "?"))

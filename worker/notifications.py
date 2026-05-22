@@ -49,6 +49,10 @@ def send_sms(alert: dict[str, Any], hit: dict[str, Any], phone: str) -> bool:
     import os
     from twilio.rest import Client
 
+    if not os.environ.get("TWILIO_ACCOUNT_SID"):
+        logger.info("Twilio not configured — skipping SMS for alert %s", alert["id"])
+        return False
+
     client = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
     campground_name = alert.get("campground", {}).get("name", "campground")
     booking_url = hit.get("booking_url", "https://www.recreation.gov")
