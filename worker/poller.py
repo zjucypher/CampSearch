@@ -41,15 +41,14 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
         logger.error("camply error for alert %s: %s", alert["id"], exc)
         return []
 
-    # Normalise site_ids to strings for comparison regardless of DB storage type
-    allowed_site_ids = {str(s) for s in (alert.get("site_ids") or [])}
+    # Case-insensitive exact match on site name (e.g. "A03", "B46")
+    allowed_site_names = {str(s).upper() for s in (alert.get("site_ids") or [])}
 
     hits = []
     for site in available:
-        # Filter by specific site IDs if the alert is in "specific" mode
-        if alert["site_mode"] == "specific" and allowed_site_ids:
-            site_num = _extract_site_number(site.campsite_site_name)
-            if str(site_num) not in allowed_site_ids:
+        # Filter by specific site names if the alert is in "specific" mode
+        if alert["site_mode"] == "specific" and allowed_site_names:
+            if site.campsite_site_name.upper() not in allowed_site_names:
                 continue
 
         hits.append({
@@ -62,20 +61,6 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
 
     return hits
 
-
-def _extract_site_number(site_name: str) -> int | None:
-    """
-    Extract the numeric site number from Recreation.gov site names.
-    Handles pure numbers ('001', '14'), loop-prefixed names ('A03', 'B46', 'C09'),
-    and 'Site N' style names. Returns None for descriptive group-site names like
-    'BOAT IN GROUP 1, 15-25 people' where the number is not the site identifier.
-    """
-    import re
-    cleaned = re.sub(r"(?i)^site\s*", "", (site_name or "").strip())
-    # Allow up to 3 leading letters (loop prefix, e.g. 'A', 'B', 'GRP') followed by digits.
-    # Requires a fullmatch so descriptive names with spaces/extra words return None.
-    m = re.fullmatch(r"[A-Za-z]{0,3}\s*0*(\d+)", cleaned)
-    return int(m.group(1)) if m else None
 
 
 def is_alert_due(alert: dict[str, Any]) -> bool:

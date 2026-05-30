@@ -105,7 +105,7 @@ export default async function CampgroundDetailPage({ params }: PageProps) {
   return <CampgroundDetailClient campground={campgroundWithPhoto} watchedSiteIds={watchedSiteIds} />;
 }
 
-async function fetchWatchedSiteIds(campgroundId: string): Promise<number[]> {
+async function fetchWatchedSiteIds(campgroundId: string): Promise<string[]> {
   try {
     const cookieStore = await cookies();
     const supabase = createServerClient<Database>(
@@ -128,12 +128,12 @@ async function fetchWatchedSiteIds(campgroundId: string): Promise<number[]> {
       .eq("user_id", user.id)
       .eq("campground_id", campgroundId)
       .in("status", ["monitoring", "found"]) as {
-        data: { site_ids: number[]; site_mode: string }[] | null;
+        data: { site_ids: string[]; site_mode: string }[] | null;
       };
 
     return (alerts ?? [])
       .filter((a) => a.site_mode === "specific")
-      .flatMap((a) => a.site_ids);
+      .flatMap((a) => a.site_ids.map((s) => String(s).toUpperCase()));
   } catch {
     return [];
   }
