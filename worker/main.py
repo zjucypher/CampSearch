@@ -103,9 +103,8 @@ def process_alert(db: Client, alert: dict) -> None:
     logger.info("HIT on alert %s: %d site(s) — %s",
                 alert_id, len(hits), ", ".join(h.get("site_name", "") for h in hits))
 
-    # Update alert state — bump hits by number of newly found sites
+    # Update hit counter — keep status as "monitoring" so the alert keeps running
     db.table("alerts").update({
-        "status": "found",
         "hits": (alert.get("hits") or 0) + len(hits),
         "last_hit_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", alert_id).execute()
