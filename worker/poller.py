@@ -17,7 +17,6 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
     Poll for available sites matching the alert criteria.
     Returns a list of hit dicts (empty list = no availability).
     """
-    campground_id = alert["campground_id"]
     arrive = date.fromisoformat(alert["arrive_date"])
     depart = date.fromisoformat(alert["depart_date"])
     nights = (depart - arrive).days
@@ -28,14 +27,13 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
     try:
-        from camply.providers import RecreationDotGov
+        from camply.containers import SearchWindow
         from camply.search import SearchRecreationDotGov
 
+        search_window = SearchWindow(start_date=arrive, end_date=depart)
         searcher = SearchRecreationDotGov(
+            search_window=search_window,
             campgrounds=[rec_area_id],
-            recreation_area=None,
-            start_date=arrive,
-            end_date=depart,
             nights=nights,
         )
         available = searcher.get_all_campsites()
@@ -43,19 +41,22 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
         logger.error("camply error for alert %s: %s", alert["id"], exc)
         return []
 
+    # Normalise site_ids to strings for comparison regardless of DB storage type
+    allowed_site_ids = {str(s) for s in (alert.get("site_ids") or [])}
+
     hits = []
     for site in available:
         # Filter by specific site IDs if the alert is in "specific" mode
-        if alert["site_mode"] == "specific" and alert.get("site_ids"):
-            site_num = _extract_site_number(site.site_name)
-            if site_num not in alert["site_ids"]:
+        if alert["site_mode"] == "specific" and allowed_site_ids:
+            site_num = _extract_site_number(site.campsite_site_name)
+            if str(site_num) not in allowed_site_ids:
                 continue
 
         hits.append({
-            "site_id": _extract_site_number(site.site_name),
-            "site_name": site.site_name,
-            "arrive_date": arrive.isoformat(),
-            "depart_date": depart.isoformat(),
+            "site_id": site.campsite_id,
+            "site_name": site.campsite_site_name,
+            "arrive_date": site.booking_date.date().isoformat(),
+            "depart_date": site.booking_end_date.date().isoformat(),
             "booking_url": site.booking_url,
         })
 
@@ -63,10 +64,15 @@ def check_alert(alert: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _extract_site_number(site_name: str) -> int | None:
-    """Extract numeric site number from a name like 'Site 14' or '14'."""
+    """
+    Extract site number only from names that ARE a number, like '001', '14', 'Site 14'.
+    Returns None for descriptive names like 'BOAT IN GROUP 1' to avoid false positives
+    when multiple camp loops share one Recreation.gov facility.
+    """
     import re
-    m = re.search(r"\d+", site_name or "")
-    return int(m.group()) if m else None
+    cleaned = re.sub(r"(?i)^site\s*", "", (site_name or "").strip())
+    m = re.fullmatch(r"0*(\d+)", cleaned)
+    return int(m.group(1)) if m else None
 
 
 def is_alert_due(alert: dict[str, Any]) -> bool:
