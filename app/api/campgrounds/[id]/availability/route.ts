@@ -10,68 +10,25 @@ export type CampsiteAvailability = {
   avail: Record<string, boolean>; // "YYYY-MM-DD" → true=Available
 };
 
-// Recreation.gov blocks Node.js's TLS fingerprint (undici/OpenSSL) with HTTP 400.
-// Python's requests library uses a different TLS stack that rec.gov accepts —
-// the same stack camply uses. We spawn a tiny Python subprocess to do the fetch.
-const PYTHON_FETCHER = `
-import sys, json, requests
-
-facility_id = sys.argv[1]
-months      = sys.argv[2].split(",")
-result      = {}
-
-for month in months:
-    url = f"https://www.recreation.gov/api/camps/availability/campground/{facility_id}/month"
-    try:
-        r = requests.get(
-            url,
-            params={"start_date": f"{month}T00:00:00.000Z"},
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-            timeout=15,
-        )
-        if not r.ok:
-            continue
-        for cid, info in r.json().get("campsites", {}).items():
-            if cid not in result:
-                result[cid] = {
-                    "site": info.get("site") or cid,
-                    "loop": info.get("loop") or "",
-                    "type": info.get("campsite_type") or "",
-                    "avail": {},
-                }
-            for date_key, status in (info.get("availabilities") or {}).items():
-                result[cid]["avail"][date_key.split("T")[0]] = (status == "Available")
-    except Exception as e:
-        sys.stderr.write(f"month {month}: {e}\\n")
-
-json.dump(result, sys.stdout)
-`.trim();
-
-// Search Recreation.gov by campground name to find its facility ID
-const PYTHON_LOOKUP = `
-import sys, json, re, requests
-
-name = sys.argv[1]
-r = requests.get(
-    "https://www.recreation.gov/api/search",
-    params={"q": name, "entity_type": "campground", "exact": "false"},
-    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-    timeout=10,
-)
-results = r.json().get("results", []) if r.ok else []
-# Return first result's entity_id (facility ID)
-print(results[0]["entity_id"] if results else "")
-`.trim();
-
-function spawnPython(args: string[], script: string): Promise<string> {
+// Recreation.gov blocks Node.js undici's TLS fingerprint with HTTP 400.
+// curl uses OpenSSL directly (different JA3 fingerprint) and is accepted.
+// It is available on Vercel's Lambda (Amazon Linux) and local macOS/Linux.
+function curlGet(url: string, params: Record<string, string>): Promise<string> {
+  const qs = new URLSearchParams(params).toString();
   return new Promise((resolve) => {
-    const proc = spawn("python3", ["-c", script, ...args]);
+    const proc = spawn("curl", [
+      "-s",
+      "--max-time", "15",
+      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      `${url}?${qs}`,
+    ]);
     let out = "";
+    let err = "";
     proc.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); });
-    proc.on("close", () => resolve(out.trim()));
-    proc.on("error", () => resolve(""));
+    proc.stderr.on("data", (chunk: Buffer) => { err += chunk.toString(); });
     const timer = setTimeout(() => { proc.kill(); resolve(""); }, 20_000);
-    proc.on("close", () => clearTimeout(timer));
+    proc.on("close", () => { clearTimeout(timer); if (err) console.error("curl:", err.trim()); resolve(out.trim()); });
+    proc.on("error", () => { clearTimeout(timer); resolve(""); });
   });
 }
 
@@ -93,7 +50,6 @@ export async function GET(
   const startStr = searchParams.get("start") ?? new Date().toISOString().split("T")[0];
   const days = Math.min(parseInt(searchParams.get("days") ?? "14"), 180);
 
-  // Look up campground to determine provider and facility ID
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: campground } = await (serviceDb().from("campgrounds") as any)
     .select("id, name, agency, rec_area_id")
@@ -104,19 +60,25 @@ export async function GET(
     return NextResponse.json({ error: "Campground not found" }, { status: 404 });
   }
 
-  // CA state parks use ReserveCalifornia — not supported here
   if (campground.agency === "CA-SP") {
     return NextResponse.json({ campsites: {}, unsupported: true });
   }
 
-  // For NPS / USFS campgrounds, resolve facility ID:
-  // use the stored rec_area_id or fall back to a live search
   let facilityId = campground.rec_area_id ? String(campground.rec_area_id) : "";
 
+  // Fall back to a live Recreation.gov search if we don't have the facility ID stored
   if (!facilityId) {
-    facilityId = await spawnPython([campground.name], PYTHON_LOOKUP);
+    const raw = await curlGet("https://www.recreation.gov/api/search", {
+      q: campground.name,
+      entity_type: "campground",
+      exact: "false",
+    });
+    try {
+      const results = JSON.parse(raw)?.results ?? [];
+      facilityId = results[0]?.entity_id ? String(results[0].entity_id) : "";
+    } catch { /* leave empty */ }
+
     if (facilityId) {
-      // Persist the discovered ID so subsequent requests skip the lookup
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (serviceDb().from("campgrounds") as any)
         .update({ rec_area_id: parseInt(facilityId) })
@@ -128,7 +90,7 @@ export async function GET(
     return NextResponse.json({ campsites: {} });
   }
 
-  // Determine which calendar months to fetch
+  // Determine which calendar months to cover
   const startDate = new Date(startStr + "T12:00:00Z");
   const endDate   = new Date(startDate.getTime() + days * 86_400_000);
 
@@ -140,9 +102,31 @@ export async function GET(
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
 
-  const raw = await spawnPython([facilityId, [...months].join(",")], PYTHON_FETCHER);
-  let campsites: Record<string, CampsiteAvailability> = {};
-  try { campsites = JSON.parse(raw); } catch { /* leave empty */ }
+  // Fetch availability for each month and merge into a single campsites map
+  const campsites: Record<string, CampsiteAvailability> = {};
+
+  await Promise.all([...months].map(async (month) => {
+    const raw = await curlGet(
+      `https://www.recreation.gov/api/camps/availability/campground/${facilityId}/month`,
+      { start_date: `${month}T00:00:00.000Z` }
+    );
+    let data: Record<string, unknown>;
+    try { data = JSON.parse(raw); } catch { return; }
+
+    for (const [cid, info] of Object.entries(data.campsites as Record<string, Record<string, unknown>> ?? {})) {
+      if (!campsites[cid]) {
+        campsites[cid] = {
+          site: (info.site as string) || cid,
+          loop: (info.loop as string) || "",
+          type: (info.campsite_type as string) || "",
+          avail: {},
+        };
+      }
+      for (const [dateKey, status] of Object.entries(info.availabilities as Record<string, string> ?? {})) {
+        campsites[cid].avail[dateKey.split("T")[0]] = status === "Available";
+      }
+    }
+  }));
 
   return NextResponse.json({ campsites });
 }
