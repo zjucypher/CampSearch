@@ -182,6 +182,7 @@ export default function DashboardPage() {
     if (h.event_type === "notified") return `Hit at ${name} — site ${h.site_name ?? h.site_id}`;
     if (h.event_type === "paused") return `Alert paused — ${name}`;
     if (h.event_type === "resumed") return `Alert resumed — ${name}`;
+    if (h.event_type === "deleted") return `Alert deleted — ${name}`;
     if (h.event_type === "check") return `Checked ${name}`;
     return `${h.event_type} — ${name}`;
   }
@@ -190,6 +191,7 @@ export default function DashboardPage() {
     if (h.event_type === "notified") return "Notified";
     if (h.event_type === "paused") return "Paused";
     if (h.event_type === "resumed") return "Resumed";
+    if (h.event_type === "deleted") return "Deleted";
     return "Checked";
   }
 
