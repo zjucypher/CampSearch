@@ -100,38 +100,39 @@ def process_alert(db: Client, alert: dict) -> None:
     if not hits:
         return
 
-    # Process first hit (avoid notification spam for multiple sites)
-    hit = hits[0]
-    logger.info("HIT on alert %s: %s", alert_id, hit.get("site_name"))
+    logger.info("HIT on alert %s: %d site(s) — %s",
+                alert_id, len(hits), ", ".join(h.get("site_name", "") for h in hits))
 
-    # Update alert state
+    # Update alert state — bump hits by number of newly found sites
     db.table("alerts").update({
         "status": "found",
-        "hits": (alert.get("hits") or 0) + 1,
+        "hits": (alert.get("hits") or 0) + len(hits),
         "last_hit_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", alert_id).execute()
 
-    # Write notified history row (Realtime subscription fires dashboard toast)
-    db.table("alert_history").insert({
-        "alert_id": alert_id,
-        "user_id": user_id,
-        "event_type": "notified",
-        "site_id": hit.get("site_id"),
-        "site_name": hit.get("site_name"),
-        "arrive_date": hit.get("arrive_date"),
-        "depart_date": hit.get("depart_date"),
-        "detail": {"booking_url": hit.get("booking_url"), "all_hits": len(hits)},
-    }).execute()
+    # Write one history row per hit so every site appears in the dashboard
+    for hit in hits:
+        db.table("alert_history").insert({
+            "alert_id": alert_id,
+            "user_id": user_id,
+            "event_type": "notified",
+            "site_id": hit.get("site_id"),
+            "site_name": hit.get("site_name"),
+            "arrive_date": hit.get("arrive_date"),
+            "depart_date": hit.get("depart_date"),
+            "detail": {"booking_url": hit.get("booking_url")},
+        }).execute()
 
-    # Notifications
+    # Send a single notification for the first hit to avoid spam
+    first_hit = hits[0]
     user_email = fetch_user_email(db, user_id)
     user_name = profile.get("full_name") or "Camper"
 
     if profile.get("notify_email") and user_email:
-        send_email(alert, hit, user_email, user_name)
+        send_email(alert, first_hit, user_email, user_name)
 
     if profile.get("notify_sms") and profile.get("phone"):
-        send_sms(alert, hit, profile["phone"])
+        send_sms(alert, first_hit, profile["phone"])
 
 
 def run_cycle(db: Client) -> None:
