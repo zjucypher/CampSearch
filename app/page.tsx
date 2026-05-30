@@ -48,7 +48,13 @@ export default function LandingPage() {
           </div>
 
           <div style={{ position: "relative" }}>
-            <Photo label="hero · upper pines at dusk" height={380} />
+            <Photo
+              label="Upper Pines at dusk"
+              seed="yosemite-upper-pines-campground"
+              imgWidth={900} imgHeight={600}
+              height={380}
+              style={{ borderRadius: "var(--cs-radius-lg)" }}
+            />
             <div className="cs-card" style={{
               position: "absolute", bottom: -28, right: -16,
               padding: 14, width: 280,

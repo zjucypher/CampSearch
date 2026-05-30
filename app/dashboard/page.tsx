@@ -12,7 +12,7 @@ import Toast from "@/components/cs/Toast";
 import type { Database } from "@/lib/supabase/types";
 
 type Alert = Database["public"]["Tables"]["alerts"]["Row"] & {
-  campgrounds: { id: string; name: string; park: string } | null;
+  campgrounds: { id: string; name: string; park: string; photo_url: string | null } | null;
 };
 type HistoryRow = Database["public"]["Tables"]["alert_history"]["Row"] & {
   alerts: { campground_id: string; campgrounds: { name: string } | null } | null;
@@ -288,7 +288,14 @@ export default function DashboardPage() {
                     <Icon name="settings" size={14} />
                   </button>
                 </div>
-                <Photo label={activeAlert.campground_id} height={140} style={{ marginBottom: 16 }} />
+                <Photo
+                  label={activeAlert.campgrounds?.name ?? activeAlert.campground_id}
+                  src={activeAlert.campgrounds?.photo_url}
+                  seed={activeAlert.campground_id}
+                  imgWidth={600} imgHeight={280}
+                  height={140}
+                  style={{ marginBottom: 16, borderRadius: "var(--cs-radius-lg)" }}
+                />
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
                   <StatusPill status={activeAlert.status} hits={activeAlert.hits} />

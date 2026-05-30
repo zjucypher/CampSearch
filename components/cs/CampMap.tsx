@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
 
 export type MapCampground = {
   id: string;
@@ -16,21 +15,41 @@ interface Props {
   campgrounds: MapCampground[];
   activeId?: string;
   onSelect?: (id: string) => void;
-  height?: number;
+  height?: number | string;
 }
 
 const CA_CENTER: [number, number] = [-119.5, 37.5];
 const TILE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
-// Hard-coded Field Notes palette so CSS vars don't need to resolve in imperatively created DOM nodes
+// Field Notes palette — hardcoded so they work inside WebGL paint expressions
 const PRIMARY = "#3A4B36";
 const PRIMARY_INK = "#FBF6EA";
 const PARCHMENT = "#F5F2EA";
 
+const SOURCE_ID = "campgrounds";
+const LAYER_CIRCLE = "campgrounds-circle";
+const LAYER_LABEL = "campgrounds-label";
+
+function toGeoJSON(campgrounds: MapCampground[], activeId?: string): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: campgrounds
+      .filter((c) => c.lat != null && c.lng != null)
+      .map((c) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [c.lng!, c.lat!] },
+        properties: {
+          id: c.id,
+          label: c.name.charAt(0).toUpperCase(),
+          active: c.id === activeId ? 1 : 0,
+        },
+      })),
+  };
+}
+
 export default function CampMap({ campgrounds, activeId, onSelect, height = 460 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const markersRef = useRef(new Map<string, maplibregl.Marker>());
   const [ready, setReady] = useState(false);
 
   // Mount map once
@@ -48,80 +67,98 @@ export default function CampMap({ campgrounds, activeId, onSelect, height = 460 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-    map.on("load", () => setReady(true));
+    map.on("load", () => {
+      // GeoJSON source — updated later when campgrounds change
+      map.addSource(SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      // Circle layer — rendered by WebGL, no lag during pan
+      map.addLayer({
+        id: LAYER_CIRCLE,
+        type: "circle",
+        source: SOURCE_ID,
+        paint: {
+          "circle-radius": ["case", ["==", ["get", "active"], 1], 14, 11],
+          "circle-color": ["case", ["==", ["get", "active"], 1], PRIMARY, PARCHMENT],
+          "circle-stroke-color": PRIMARY,
+          "circle-stroke-width": 2,
+          "circle-opacity": 1,
+          "circle-pitch-alignment": "map",
+        },
+      });
+
+      // Single-letter label inside the circle
+      map.addLayer({
+        id: LAYER_LABEL,
+        type: "symbol",
+        source: SOURCE_ID,
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": ["case", ["==", ["get", "active"], 1], 12, 10],
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+        },
+        paint: {
+          "text-color": ["case", ["==", ["get", "active"], 1], PRIMARY_INK, PRIMARY],
+          "text-halo-color": "rgba(0,0,0,0)",
+          "text-halo-width": 0,
+        },
+      });
+
+      // Click on circle → notify parent
+      map.on("click", LAYER_CIRCLE, (e) => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        if (id) onSelect?.(id);
+      });
+
+      // Pointer cursor on hover
+      map.on("mouseenter", LAYER_CIRCLE, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", LAYER_CIRCLE, () => {
+        map.getCanvas().style.cursor = "";
+      });
+
+      setReady(true);
+    });
+
     mapRef.current = map;
 
     return () => {
       map.remove();
       mapRef.current = null;
       setReady(false);
-      markersRef.current.clear();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync markers whenever data or active changes
+  // Sync GeoJSON data whenever campgrounds or active selection changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    const incoming = new Set(campgrounds.map((c) => c.id));
+    const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(toGeoJSON(campgrounds, activeId));
+  }, [campgrounds, activeId, ready]);
 
-    // Remove stale markers
-    markersRef.current.forEach((marker, id) => {
-      if (!incoming.has(id)) {
-        marker.remove();
-        markersRef.current.delete(id);
-      }
-    });
+  // Update click handler ref so it always closes over the latest onSelect
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
 
-    // Upsert markers
-    campgrounds
-      .filter((c) => c.lat != null && c.lng != null)
-      .forEach((c) => {
-        const isActive = c.id === activeId;
+    const handler = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      const id = e.features?.[0]?.properties?.id as string | undefined;
+      if (id) onSelect?.(id);
+    };
 
-        if (markersRef.current.has(c.id)) {
-          // Update existing marker style
-          const el = markersRef.current.get(c.id)!.getElement() as HTMLButtonElement;
-          el.style.background = isActive ? PRIMARY : PARCHMENT;
-          el.style.color = isActive ? PRIMARY_INK : PRIMARY;
-          el.style.transform = `scale(${isActive ? 1.25 : 1})`;
-          el.style.zIndex = isActive ? "10" : "1";
-          return;
-        }
+    map.off("click", LAYER_CIRCLE, handler);
+    map.on("click", LAYER_CIRCLE, handler);
 
-        const el = document.createElement("button");
-        Object.assign(el.style, {
-          width: "28px",
-          height: "28px",
-          borderRadius: "50%",
-          background: isActive ? PRIMARY : PARCHMENT,
-          color: isActive ? PRIMARY_INK : PRIMARY,
-          border: `2px solid ${PRIMARY}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "10px",
-          fontWeight: "700",
-          fontFamily: "sans-serif",
-          cursor: "pointer",
-          boxShadow: "0 1px 4px rgba(0,0,0,.3)",
-          transition: "transform .15s, background .15s",
-          transform: `scale(${isActive ? 1.25 : 1})`,
-          zIndex: isActive ? "10" : "1",
-          padding: "0",
-        });
-        el.textContent = c.name.charAt(0);
-        el.title = c.name;
-        el.addEventListener("click", () => onSelect?.(c.id));
-
-        const marker = new maplibregl.Marker({ element: el, anchor: "center" })
-          .setLngLat([c.lng!, c.lat!])
-          .addTo(map);
-
-        markersRef.current.set(c.id, marker);
-      });
-  }, [campgrounds, activeId, onSelect, ready]);
+    return () => { map.off("click", LAYER_CIRCLE, handler); };
+  }, [onSelect, ready]);
 
   // Fly to active campground
   useEffect(() => {
@@ -137,11 +174,14 @@ export default function CampMap({ campgrounds, activeId, onSelect, height = 460 
     <div
       ref={containerRef}
       style={{
+        position: "relative",
         width: "100%",
         height,
+        flex: typeof height === "string" && height.includes("%") ? 1 : undefined,
         borderRadius: "var(--cs-radius-lg)",
         overflow: "hidden",
         background: "var(--surface-2)",
+        minHeight: 200,
       }}
     />
   );

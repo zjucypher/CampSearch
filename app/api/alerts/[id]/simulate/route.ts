@@ -4,8 +4,14 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import type { Database } from "@/lib/supabase/types";
 import { sendHitEmail } from "@/lib/email/send";
+import { checkRateLimit, getClientIp } from "@/lib/ratelimit";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { allowed } = checkRateLimit(`simulate:${getClientIp(_req)}`, 5, 60_000);
+  if (!allowed) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const { id } = await params;
   const cookieStore = await cookies();
   const supabase = createServerClient<Database>(
@@ -84,6 +90,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         arriveDate: alert.arrive_date,
         departDate: alert.depart_date,
         bookingUrl,
+        alertId: id,
       }).catch((err: unknown) => console.error("[simulate] email error:", err));
     }
   }

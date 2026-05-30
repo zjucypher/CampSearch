@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { Database } from "@/lib/supabase/types";
 import { PLAN_LIMITS } from "@/lib/stripe";
+import { checkRateLimit, getClientIp } from "@/lib/ratelimit";
 
 async function getSupabase() {
   const cookieStore = await cookies();
@@ -28,7 +29,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("alerts")
-    .select("*, campgrounds(id, name, park)")
+    .select("*, campgrounds(id, name, park, photo_url)")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -40,6 +41,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { allowed } = checkRateLimit(`alerts:${getClientIp(request)}`, 20, 60_000);
+  if (!allowed) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const supabase = await getSupabase();
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   if (userError || !user) {

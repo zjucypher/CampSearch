@@ -44,6 +44,11 @@ export default function AccountPage() {
   const [notifyEmail, setNotifyEmail] = useState(true);
   const [notifySms, setNotifySms] = useState(false);
 
+  // Alert defaults
+  const [defaultAdults, setDefaultAdults] = useState(2);
+  const [defaultFlexibility, setDefaultFlexibility] = useState("exact");
+  const [defaultPoll, setDefaultPoll] = useState(60);
+
   useEffect(() => {
     const supabase = getSupabase();
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -58,6 +63,9 @@ export default function AccountPage() {
         setTimezone(prof.timezone);
         setNotifyEmail(prof.notify_email);
         setNotifySms(prof.notify_sms);
+        setDefaultAdults(prof.default_adults ?? 2);
+        setDefaultFlexibility(prof.default_flexibility ?? "exact");
+        setDefaultPoll(prof.default_poll ?? 60);
       });
     });
   }, []);
@@ -73,6 +81,9 @@ export default function AccountPage() {
       timezone,
       notify_email: notifyEmail,
       notify_sms: notifySms,
+      default_adults: defaultAdults,
+      default_flexibility: defaultFlexibility,
+      default_poll: defaultPoll,
     }).eq("id", profile.id);
     setSaving(false);
     setSaved(true);
@@ -234,39 +245,44 @@ export default function AccountPage() {
               <div className="cs-card" style={{ padding: 26 }}>
                 <h3 style={{ fontSize: 18, marginBottom: 6 }}>Default alert settings</h3>
                 <p className="cs-muted" style={{ fontSize: 13, marginBottom: 24 }}>Used as starting values when you create a new alert.</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
                   <div>
-                    <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Default party size</label>
-                    <input className="cs-input" defaultValue={`${profile?.default_adults ?? 2} adults`} />
+                    <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Default adults</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <button className="cs-btn cs-btn--quiet cs-btn--sm" onClick={() => setDefaultAdults((n) => Math.max(1, n - 1))}>−</button>
+                      <span style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500, minWidth: 28, textAlign: "center" }}>{defaultAdults}</span>
+                      <button className="cs-btn cs-btn--quiet cs-btn--sm" onClick={() => setDefaultAdults((n) => Math.min(12, n + 1))}>+</button>
+                    </div>
                   </div>
                   <div>
                     <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Default flexibility</label>
-                    <input className="cs-input" defaultValue={profile?.default_flexibility ?? "exact"} />
+                    <select
+                      className="cs-input"
+                      value={defaultFlexibility}
+                      onChange={(e) => setDefaultFlexibility(e.target.value)}
+                    >
+                      <option value="exact">Exact dates</option>
+                      <option value="3d">± 3 days</option>
+                      <option value="week">± 1 week</option>
+                      <option value="wknd">Weekends</option>
+                    </select>
                   </div>
                   <div>
-                    <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Default polling</label>
-                    <input className="cs-input" defaultValue={`Every ${profile?.default_poll ?? 60}s`} />
-                  </div>
-                  <div>
-                    <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Default channels</label>
-                    <input className="cs-input" defaultValue={(profile?.default_channels ?? ["email"]).join(" + ").toUpperCase()} />
+                    <label className="cs-label" style={{ display: "block", marginBottom: 6 }}>Default polling interval</label>
+                    <select
+                      className="cs-input"
+                      value={defaultPoll}
+                      onChange={(e) => setDefaultPoll(Number(e.target.value))}
+                    >
+                      <option value={300}>Every 5 min (Free)</option>
+                      <option value={60}>Every 60s (Pro)</option>
+                      <option value={30}>Every 30s (Ranger)</option>
+                    </select>
                   </div>
                 </div>
-                <hr className="cs-divider" style={{ margin: "20px 0" }} />
-                <h4 style={{ fontFamily: "var(--font-display)", fontSize: 15, marginBottom: 10 }}>Region focus</h4>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {["Central Sierra", "Big Sur", "North Coast", "Bay Area", "Mojave"].map((r) => {
-                    const active = ["Central Sierra", "Big Sur"].includes(r);
-                    return (
-                      <span key={r} className="cs-pill" style={{
-                        padding: "6px 12px", cursor: "pointer",
-                        background: active ? "var(--primary)" : "var(--surface-2)",
-                        color: active ? "var(--primary-ink)" : "var(--ink-2)",
-                        borderColor: "transparent",
-                      }}>{r}</span>
-                    );
-                  })}
-                </div>
+                <button className="cs-btn cs-btn--sm" onClick={saveProfile} disabled={saving}>
+                  {saved ? "Saved!" : saving ? "Saving…" : "Save defaults"}
+                </button>
               </div>
             )}
           </div>

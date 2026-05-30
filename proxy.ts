@@ -1,7 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED_PATHS = ["/dashboard", "/account", "/campgrounds"];
+function isProtected(pathname: string): boolean {
+  if (pathname.startsWith("/dashboard")) return true;
+  if (pathname.startsWith("/account")) return true;
+  // Only protect alert creation, not public campground browse/detail pages
+  if (pathname.endsWith("/alert/new")) return true;
+  return false;
+}
 
 export async function proxy(request: NextRequest) {
   // Skip auth enforcement when Supabase is not yet configured
@@ -40,9 +46,8 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p));
 
-  if (isProtected && !user) {
+  if (isProtected(pathname) && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);

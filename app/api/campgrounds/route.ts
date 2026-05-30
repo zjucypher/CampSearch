@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   const q = searchParams.get("q")?.trim() ?? "";
   const park = searchParams.get("park") ?? "";
   const agency = searchParams.get("agency") ?? "";
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 50);
+  const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 500);
 
   const cookieStore = await cookies();
   const supabase = createServerClient<Database>(
@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
       },
     }
   );
+
+  const amenity = searchParams.get("amenity") ?? "";
 
   let query = supabase
     .from("campgrounds")
@@ -37,6 +39,9 @@ export async function GET(request: NextRequest) {
   }
   if (agency) {
     query = query.eq("agency", agency);
+  }
+  if (amenity) {
+    query = query.contains("amenities", [amenity]);
   }
 
   const { data, error } = await query;

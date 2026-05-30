@@ -1,7 +1,21 @@
 import { Resend } from "resend";
+import { createHmac } from "crypto";
 
 function getResend() {
   return new Resend(process.env.RESEND_API_KEY ?? "re_placeholder");
+}
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://campsearch.vercel.app";
+
+function makeToken(alertId: string): string {
+  return createHmac("sha256", process.env.WORKER_SECRET ?? "secret")
+    .update(alertId)
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function actionUrl(alertId: string, action: "pause" | "delete"): string {
+  return `${SITE_URL}/api/unsubscribe?alert_id=${alertId}&token=${makeToken(alertId)}&action=${action}`;
 }
 
 export type HitEmailPayload = {
@@ -13,6 +27,7 @@ export type HitEmailPayload = {
   arriveDate: string;
   departDate: string;
   bookingUrl: string;
+  alertId?: string;
 };
 
 export async function sendHitEmail(p: HitEmailPayload) {
@@ -25,6 +40,10 @@ export async function sendHitEmail(p: HitEmailPayload) {
   const nights = Math.round(
     (new Date(p.departDate).getTime() - new Date(p.arriveDate).getTime()) / 86400000
   );
+
+  const pauseUrl = p.alertId ? actionUrl(p.alertId, "pause") : `${SITE_URL}/dashboard`;
+  const deleteUrl = p.alertId ? actionUrl(p.alertId, "delete") : `${SITE_URL}/dashboard`;
+  const manageUrl = `${SITE_URL}/dashboard`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -74,8 +93,10 @@ export async function sendHitEmail(p: HitEmailPayload) {
     </p>
     <hr style="border:none;border-top:1px solid #eee;margin:28px 0">
     <p style="font-size:11px;color:#888;line-height:1.6">
-      You're receiving this because a CampSearch alert matched.
-      <a href="https://campsearch.vercel.app/dashboard" style="color:#2D4A36">Manage alerts</a>
+      You're receiving this because a CampSearch alert matched. &nbsp;
+      <a href="${pauseUrl}" style="color:#2D4A36">Pause this alert</a> ·
+      <a href="${deleteUrl}" style="color:#2D4A36">Unsubscribe</a> ·
+      <a href="${manageUrl}" style="color:#2D4A36">Manage alerts</a>
     </p>
   </td></tr>
 </table>
