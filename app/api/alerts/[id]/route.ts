@@ -44,6 +44,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Record resume event so the worker can reset its 1-hour dedup cooldown
+  if (patch.status === "monitoring") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from("alert_history") as any).insert({
+      alert_id: id,
+      user_id: user.id,
+      event_type: "resumed",
+    });
+  }
+
   return NextResponse.json({ alert: data });
 }
 

@@ -100,9 +100,26 @@ def process_alert(db: Client, alert: dict) -> None:
     if not hits:
         return
 
-    # Deduplicate: skip sites already notified within the last hour so a
-    # continuously-available site doesn't flood the activity log every 30s.
-    cooldown_cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    # Deduplicate: skip sites already notified since the last resume (or 1 hour ago
+    # if the alert has never been manually resumed). When the user resumes an alert,
+    # the API inserts a "resumed" event — any prior notifications fall before that
+    # timestamp and are ignored, so a fresh notification fires immediately.
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    last_resumed = db.table("alert_history")\
+        .select("created_at")\
+        .eq("alert_id", alert_id)\
+        .eq("event_type", "resumed")\
+        .order("created_at", desc=True)\
+        .limit(1)\
+        .execute()
+    if last_resumed.data:
+        resumed_at = last_resumed.data[0]["created_at"]
+        # Use the later of (1h ago, last resume) so the window never grows beyond 1h
+        # for alerts that were resumed a long time ago and hit multiple times since.
+        resumed_dt = datetime.fromisoformat(resumed_at.replace("Z", "+00:00"))
+        cooldown_cutoff = max(one_hour_ago, resumed_dt).isoformat()
+    else:
+        cooldown_cutoff = one_hour_ago.isoformat()
     recent = db.table("alert_history")\
         .select("site_name")\
         .eq("alert_id", alert_id)\

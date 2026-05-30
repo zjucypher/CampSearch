@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
@@ -53,10 +53,11 @@ export default function DashboardPage() {
   const [hitsList, setHitsList]           = useState<HistoryRow[]>([]);
   const [hitsLoading, setHitsLoading]     = useState(false);
   const [toastOpen, setToastOpen]         = useState(false);
-  const [toastCampground, setToastCampground] = useState("");
+  const [toastHit, setToastHit] = useState({ campground: "", site: "", arrive: "", depart: "", url: "" });
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"all" | "monitoring" | "paused">("all");
+  const alertsRef = useRef<Alert[]>([]);
 
   const fetchData = useCallback(async () => {
     const [alertsRes, historyRes] = await Promise.all([
@@ -66,6 +67,7 @@ export default function DashboardPage() {
     const alertsData = await alertsRes.json();
     const historyData = await historyRes.json();
     const list: Alert[] = alertsData.alerts ?? [];
+    alertsRef.current = list;
     setAlerts(list);
     setHistory(historyData.history ?? []);
     setActiveId((prev) => list.find((a) => a.id === prev) ? prev : list[0]?.id ?? null);
@@ -87,12 +89,15 @@ export default function DashboardPage() {
   // Supabase Realtime — refresh on any activity or alert status change.
   // user_id filter is required on RLS-enabled tables so the server knows
   // which rows to deliver; without it only filtered subscriptions work.
+  // alertsRef (not alerts state) is used in the callback so this effect
+  // only runs once on mount, avoiding a subscribe/teardown loop.
   useEffect(() => {
     const supabase = getSupabase();
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
 
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
+      if (!user || cancelled) return;
       channel = supabase
         .channel("dashboard-live")
         .on(
@@ -102,8 +107,15 @@ export default function DashboardPage() {
           (payload) => {
             const row = payload.new as HistoryRow;
             if (row.event_type === "notified") {
-              const alert = alerts.find((a) => a.id === row.alert_id);
-              setToastCampground(alert?.campgrounds?.name ?? "A campsite");
+              const alert = alertsRef.current.find((a) => a.id === row.alert_id);
+              const detail = row.detail as { booking_url?: string } | null;
+              setToastHit({
+                campground: alert?.campgrounds?.name ?? "A campsite",
+                site: row.site_name ?? "",
+                arrive: row.arrive_date ?? "",
+                depart: row.depart_date ?? "",
+                url: detail?.booking_url ?? "",
+              });
               setToastOpen(true);
             }
             fetchData();
@@ -118,8 +130,11 @@ export default function DashboardPage() {
         .subscribe();
     });
 
-    return () => { if (channel) supabase.removeChannel(channel); };
-  }, [alerts, fetchData]);
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [fetchData]);
 
   async function handlePauseResume(alert: Alert) {
     setActionLoading(alert.id);
@@ -663,8 +678,13 @@ export default function DashboardPage() {
 
       <Toast
         open={toastOpen}
+        campgroundName={toastHit.campground}
+        siteName={toastHit.site}
+        arriveDate={toastHit.arrive}
+        departDate={toastHit.depart}
+        bookingUrl={toastHit.url}
         onDismiss={() => setToastOpen(false)}
-        onView={() => { setToastOpen(false); router.push(`/alerts/${activeId}/preview`); }}
+        onBook={() => { setToastOpen(false); if (toastHit.url) window.open(toastHit.url, "_blank"); }}
       />
     </div>
   );
