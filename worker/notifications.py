@@ -32,7 +32,7 @@ def send_email(alert: dict[str, Any], hit: dict[str, Any], user_email: str, user
 
     try:
         resend.Emails.send({
-            "from": "CampSearch <alerts@campsearch.app>",
+            "from": "CampSearch <onboarding@resend.dev>",
             "to": [user_email],
             "subject": subject,
             "html": html,
@@ -98,7 +98,7 @@ def _render_email_html(
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:4px;overflow:hidden">
   <tr><td style="padding:10px 16px;background:#f4f4f0;color:#666;font-size:11px;border-bottom:1px solid #e5e5e5">
-    CampSearch &nbsp;·&nbsp; alerts@campsearch.app &nbsp;·&nbsp; to {user_name}
+    CampSearch &nbsp;·&nbsp; to {user_name}
   </td></tr>
   <tr><td style="padding:32px 36px 24px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:32px">
