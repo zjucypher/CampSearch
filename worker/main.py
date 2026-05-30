@@ -120,8 +120,9 @@ def process_alert(db: Client, alert: dict) -> None:
     logger.info("HIT on alert %s: %d new site(s) — %s",
                 alert_id, len(new_hits), ", ".join(h.get("site_name", "") for h in new_hits))
 
-    # Update hit counter — keep status as "monitoring" so the alert keeps running
+    # Pause the alert so it stops polling until the user manually resumes
     db.table("alerts").update({
+        "status": "paused",
         "hits": (alert.get("hits") or 0) + len(new_hits),
         "last_hit_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", alert_id).execute()
