@@ -19,11 +19,11 @@ type HistoryRow = Database["public"]["Tables"]["alert_history"]["Row"] & {
 };
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(iso.includes("T") ? iso : iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 function formatDateRange(arrive: string, depart: string) {
-  const a = new Date(arrive);
-  const d = new Date(depart);
+  const a = new Date(arrive.includes("T") ? arrive : arrive + "T12:00:00");
+  const d = new Date(depart.includes("T") ? depart : depart + "T12:00:00");
   return `${a.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
 }
 function timeAgo(iso: string) {
@@ -47,11 +47,16 @@ export default function DashboardPage() {
   const router = useRouter();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [toastOpen, setToastOpen] = useState(false);
+  const [activeId, setActiveId]           = useState<string | null>(null);
+  const [expandedHitId, setExpandedHitId] = useState<string | null>(null);
+  const [hitsAlertId, setHitsAlertId]     = useState<string | null>(null);
+  const [hitsList, setHitsList]           = useState<HistoryRow[]>([]);
+  const [hitsLoading, setHitsLoading]     = useState(false);
+  const [toastOpen, setToastOpen]         = useState(false);
   const [toastCampground, setToastCampground] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState<"all" | "monitoring" | "paused">("all");
 
   const fetchData = useCallback(async () => {
     const [alertsRes, historyRes] = await Promise.all([
@@ -69,21 +74,40 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Supabase Realtime — fire toast on new "notified" history events
+  // Fetch all notified events for a specific alert when the hits panel opens
+  useEffect(() => {
+    if (!hitsAlertId) { setHitsList([]); return; }
+    setHitsLoading(true);
+    fetch(`/api/history?alert_id=${hitsAlertId}&event_type=notified&limit=100`)
+      .then((r) => r.json())
+      .then((d) => setHitsList(d.history ?? []))
+      .finally(() => setHitsLoading(false));
+  }, [hitsAlertId]);
+
+  // Supabase Realtime — refresh on any activity or alert status change
   useEffect(() => {
     const supabase = getSupabase();
     const channel = supabase
-      .channel("dashboard-hits")
+      .channel("dashboard-live")
+      // Any new history entry (check, notified, paused, resumed) → refresh activity feed
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "alert_history", filter: `event_type=eq.notified` },
+        { event: "INSERT", schema: "public", table: "alert_history" },
         (payload) => {
           const row = payload.new as HistoryRow;
-          const alert = alerts.find((a) => a.id === row.alert_id);
-          setToastCampground(alert?.campgrounds?.name ?? "A campsite");
-          setToastOpen(true);
+          if (row.event_type === "notified") {
+            const alert = alerts.find((a) => a.id === row.alert_id);
+            setToastCampground(alert?.campgrounds?.name ?? "A campsite");
+            setToastOpen(true);
+          }
           fetchData();
         }
+      )
+      // Any alert UPDATE (status → paused, hits counter, last_checked_at) → refresh cards
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "alerts" },
+        () => { fetchData(); }
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -115,7 +139,8 @@ export default function DashboardPage() {
     if (res.ok) { await fetchData(); }
   }
 
-  const activeAlert = alerts.find((a) => a.id === activeId);
+  const filteredAlerts = filterStatus === "all" ? alerts : alerts.filter((a) => a.status === filterStatus);
+  const activeAlert = filteredAlerts.find((a) => a.id === activeId) ?? alerts.find((a) => a.id === activeId);
   const polls = [4, 7, 3, 9, 11, 6, 5, 8, 13, 9, 7, 11, 14, 8, 6];
 
   const monitoring = alerts.filter((a) => a.status === "monitoring").length;
@@ -185,9 +210,25 @@ export default function DashboardPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
               <h2 style={{ fontSize: 22 }}>Active alerts</h2>
               <div style={{ display: "flex", gap: 14, fontSize: 12.5 }}>
-                <a style={{ color: "var(--ink)", borderBottom: "1px solid var(--ink)", paddingBottom: 2 }}>All · {alerts.length}</a>
-                <a className="cs-muted">Monitoring · {monitoring}</a>
-                <a className="cs-muted">Paused · {paused}</a>
+                {(["all", "monitoring", "paused"] as const).map((f) => {
+                  const count = f === "all" ? alerts.length : f === "monitoring" ? monitoring : paused;
+                  const label = f === "all" ? "All" : f === "monitoring" ? "Monitoring" : "Paused";
+                  const active = filterStatus === f;
+                  return (
+                    <a
+                      key={f}
+                      onClick={() => setFilterStatus(f)}
+                      style={{
+                        cursor: "pointer",
+                        color: active ? "var(--ink)" : "var(--muted)",
+                        borderBottom: active ? "1px solid var(--ink)" : "1px solid transparent",
+                        paddingBottom: 2,
+                      }}
+                    >
+                      {label} · {count}
+                    </a>
+                  );
+                })}
               </div>
             </div>
 
@@ -205,23 +246,36 @@ export default function DashboardPage() {
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} style={{ height: 60, borderBottom: "1px solid var(--border)", background: "var(--surface-2)", opacity: 0.3 + i * 0.15 }} />
                 ))
-              ) : alerts.length === 0 ? (
+              ) : filteredAlerts.length === 0 ? (
                 <div style={{ padding: "32px 18px", textAlign: "center" }}>
-                  <p className="cs-muted" style={{ marginBottom: 14 }}>No alerts yet.</p>
-                  <Link href="/search" className="cs-btn cs-btn--sm"><Icon name="plus" size={13} /> Create your first alert</Link>
+                  {alerts.length === 0 ? (
+                    <>
+                      <p className="cs-muted" style={{ marginBottom: 14 }}>No alerts yet.</p>
+                      <Link href="/search" className="cs-btn cs-btn--sm"><Icon name="plus" size={13} /> Create your first alert</Link>
+                    </>
+                  ) : (
+                    <p className="cs-muted">No {filterStatus} alerts.</p>
+                  )}
                 </div>
               ) : (
-                alerts.map((a, i) => (
-                  <button key={a.id} onClick={() => setActiveId(a.id)}
+                filteredAlerts.map((a, i) => (
+                  <div key={a.id} onClick={() => setActiveId(a.id)}
                     style={{
                       display: "grid", gridTemplateColumns: "1.4fr 1.1fr 1fr 130px",
                       padding: "16px 18px", width: "100%", textAlign: "left",
                       background: activeId === a.id ? "var(--surface-2)" : "transparent",
-                      border: "none", borderBottom: i < alerts.length - 1 ? "1px solid var(--border)" : "none",
+                      borderBottom: i < filteredAlerts.length - 1 ? "1px solid var(--border)" : "none",
                       cursor: "pointer", alignItems: "center",
                     }}>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.campgrounds?.name ?? a.campground_id}</div>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); router.push(`/campgrounds/${a.campground_id}`); }}
+                        style={{ fontWeight: 600, fontSize: 13.5, color: "var(--primary)", textDecoration: "underline", textDecorationColor: "transparent", cursor: "pointer", display: "inline" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.textDecorationColor = "var(--primary)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.textDecorationColor = "transparent")}
+                      >
+                        {a.campgrounds?.name ?? a.campground_id}
+                      </div>
                       <div className="cs-muted" style={{ fontSize: 11.5 }}>{a.campgrounds?.park} · {a.site_mode === "specific" ? `sites: ${a.site_ids.join(", ")}` : "any site"}</div>
                     </div>
                     <div>
@@ -234,11 +288,30 @@ export default function DashboardPage() {
                         {a.last_checked_at ? `Checked ${timeAgo(a.last_checked_at)}` : "Not yet checked"}
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                      <span style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500 }}>{a.hits}</span>
-                      <Icon name="chevron" size={14} />
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (a.hits === 0) return;
+                          setActiveId(a.id);
+                          setHitsAlertId((prev) => prev === a.id ? null : a.id);
+                        }}
+                        style={{
+                          background: hitsAlertId === a.id ? "color-mix(in oklch, var(--success) 12%, var(--surface-2))" : "transparent",
+                          border: hitsAlertId === a.id ? "1px solid color-mix(in oklch, var(--success) 30%, var(--border))" : "1px solid transparent",
+                          borderRadius: "var(--cs-radius)",
+                          cursor: a.hits > 0 ? "pointer" : "default",
+                          display: "flex", alignItems: "center", gap: 6,
+                          padding: "4px 8px",
+                          color: a.hits > 0 ? "var(--success)" : "var(--muted)",
+                        }}
+                        title={a.hits > 0 ? "View hit history" : "No hits yet"}
+                      >
+                        <span style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500 }}>{a.hits}</span>
+                        {a.hits > 0 && <Icon name="chevron" size={13} style={{ transform: hitsAlertId === a.id ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform 0.15s" }} />}
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 ))
               )}
             </div>
@@ -252,37 +325,269 @@ export default function DashboardPage() {
                     <p className="cs-muted" style={{ fontSize: 13 }}>No activity yet — activity appears once monitoring starts.</p>
                   </div>
                 ) : (
-                  history.map((h, i) => (
-                    <div key={h.id} style={{
-                      display: "grid", gridTemplateColumns: "110px 1fr 100px",
-                      padding: "12px 18px",
-                      borderBottom: i < history.length - 1 ? "1px solid var(--border)" : "none",
-                      alignItems: "center",
-                    }}>
-                      <div className="cs-mono cs-muted" style={{ fontSize: 11 }}>{timeAgo(h.created_at)}</div>
-                      <div style={{ fontSize: 13 }}>{historyLabel(h)}</div>
-                      <div style={{ textAlign: "right" }}>
-                        <span className={`cs-pill${h.event_type === "notified" ? " cs-pill--accent" : ""}`} style={{ fontSize: 10.5 }}>
-                          {historyAction(h)}
-                        </span>
+                  history.map((h, i) => {
+                    const isHit      = h.event_type === "notified";
+                    const isExpanded = expandedHitId === h.id;
+                    const detail     = h.detail as { booking_url?: string; simulated?: boolean } | null;
+                    const bookingUrl = detail?.booking_url ?? "#";
+                    const isSimulated = detail?.simulated === true;
+                    const isLast     = i === history.length - 1;
+
+                    const nights = h.arrive_date && h.depart_date
+                      ? Math.round((new Date(h.depart_date).getTime() - new Date(h.arrive_date).getTime()) / 86400000)
+                      : null;
+
+                    return (
+                      <div key={h.id}>
+                        {/* Row */}
+                        <div
+                          onClick={() => isHit && setExpandedHitId(isExpanded ? null : h.id)}
+                          style={{
+                            display: "grid", gridTemplateColumns: "110px 1fr auto",
+                            padding: "12px 18px", alignItems: "center",
+                            borderBottom: (!isExpanded && !isLast) ? "1px solid var(--border)" : "none",
+                            cursor: isHit ? "pointer" : "default",
+                            background: isHit
+                              ? isExpanded
+                                ? "color-mix(in oklch, var(--success) 8%, var(--surface))"
+                                : "color-mix(in oklch, var(--success) 4%, var(--surface))"
+                              : "transparent",
+                          }}
+                        >
+                          <div className="cs-mono cs-muted" style={{ fontSize: 11 }}>{timeAgo(h.created_at)}</div>
+                          <div style={{ fontSize: 13 }}>
+                            {isHit ? (
+                              <span>
+                                <strong style={{ color: "var(--success)" }}>Site found</strong>
+                                {" — "}
+                                {(h.alerts as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? "Unknown"}
+                                {h.site_name ? <span className="cs-muted"> · {h.site_name}</span> : null}
+                              </span>
+                            ) : historyLabel(h)}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span className={`cs-pill${isHit ? " cs-pill--success" : ""}`} style={{ fontSize: 10.5 }}>
+                              {historyAction(h)}
+                            </span>
+                            {isHit && (
+                              <Icon
+                                name="chevron"
+                                size={13}
+                                style={{
+                                  color: "var(--muted)",
+                                  transform: isExpanded ? "rotate(-90deg)" : "rotate(90deg)",
+                                  transition: "transform 0.15s",
+                                }}
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Expanded hit detail */}
+                        {isHit && isExpanded && (
+                          <div style={{
+                            padding: "16px 18px 18px",
+                            background: "color-mix(in oklch, var(--success) 6%, var(--surface))",
+                            borderTop: "1px solid color-mix(in oklch, var(--success) 20%, var(--border))",
+                            borderBottom: !isLast ? "1px solid var(--border)" : "none",
+                          }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 14 }}>
+                              {/* Site */}
+                              <div>
+                                <div className="cs-label" style={{ marginBottom: 4 }}>Site</div>
+                                <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 500 }}>
+                                  {h.site_name ?? `Site ${h.site_id}`}
+                                </div>
+                                {isSimulated && (
+                                  <span className="cs-pill cs-pill--muted" style={{ fontSize: 10, marginTop: 4 }}>Simulated</span>
+                                )}
+                              </div>
+
+                              {/* Dates */}
+                              {h.arrive_date && h.depart_date && (
+                                <div>
+                                  <div className="cs-label" style={{ marginBottom: 4 }}>Dates</div>
+                                  <div style={{ fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 500 }}>
+                                    {new Date(h.arrive_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                    {" → "}
+                                    {new Date(h.depart_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                  </div>
+                                  {nights !== null && (
+                                    <div className="cs-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                                      {nights} night{nights !== 1 ? "s" : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Opened */}
+                              <div>
+                                <div className="cs-label" style={{ marginBottom: 4 }}>Found</div>
+                                <div style={{ fontSize: 13.5, fontWeight: 500 }}>{timeAgo(h.created_at)}</div>
+                                <div className="cs-muted" style={{ fontSize: 11.5 }}>
+                                  {new Date(h.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                                </div>
+                              </div>
+
+                              {/* Alert link */}
+                              <div>
+                                <div className="cs-label" style={{ marginBottom: 4 }}>Alert</div>
+                                <button
+                                  className="cs-btn cs-btn--quiet cs-btn--sm"
+                                  style={{ fontSize: 12 }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const a = alerts.find((a) => a.id === h.alert_id);
+                                    if (a) setActiveId(a.id);
+                                  }}
+                                >
+                                  View alert <Icon name="chevron" size={11} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <a
+                              href={bookingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 8,
+                                padding: "11px 18px",
+                                background: "var(--success)", color: "#fff",
+                                borderRadius: "var(--cs-radius)", textDecoration: "none",
+                                fontWeight: 600, fontSize: 13.5,
+                              }}
+                            >
+                              Book now on Recreation.gov →
+                            </a>
+                            {bookingUrl === "#" && (
+                              <span className="cs-muted" style={{ fontSize: 11.5, marginLeft: 12 }}>
+                                No direct booking link available
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right: sidebar detail */}
+          {/* Right: sidebar — hits history OR alert detail */}
           <div className="cs-card" style={{ padding: 22, position: "sticky", top: 32, alignSelf: "start" }}>
-            {!activeAlert ? (
+
+            {/* ── Hits history panel ── */}
+            {hitsAlertId && activeAlert ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <button
+                    className="cs-btn cs-btn--quiet cs-btn--sm"
+                    onClick={() => setHitsAlertId(null)}
+                    style={{ padding: "4px 6px" }}
+                  >
+                    <Icon name="chevron" size={13} style={{ transform: "rotate(180deg)" }} />
+                  </button>
+                  <div>
+                    <div className="cs-label" style={{ marginBottom: 2 }}>Hit history</div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{activeAlert.campgrounds?.name ?? activeAlert.campground_id}</div>
+                  </div>
+                  <span style={{
+                    marginLeft: "auto",
+                    background: "color-mix(in oklch, var(--success) 12%, var(--surface-2))",
+                    color: "var(--success)", fontFamily: "var(--font-display)",
+                    fontSize: 22, fontWeight: 500, padding: "2px 10px",
+                    borderRadius: "var(--cs-radius)",
+                  }}>{activeAlert.hits}</span>
+                </div>
+
+                {hitsLoading ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} style={{ height: 68, background: "var(--surface-2)", borderRadius: "var(--cs-radius)", opacity: 0.5 }} />
+                    ))}
+                  </div>
+                ) : hitsList.length === 0 ? (
+                  <p className="cs-muted" style={{ fontSize: 13 }}>No hits recorded yet for this alert.</p>
+                ) : (
+                  <div style={{ display: "grid", gap: 8, maxHeight: 520, overflowY: "auto" }}>
+                    {hitsList.map((h) => {
+                      const detail   = h.detail as { booking_url?: string; simulated?: boolean } | null;
+                      const bookingUrl = detail?.booking_url;
+                      const isSimulated = detail?.simulated === true;
+                      const nights = h.arrive_date && h.depart_date
+                        ? Math.round((new Date(h.depart_date).getTime() - new Date(h.arrive_date).getTime()) / 86400000)
+                        : null;
+
+                      return (
+                        <div key={h.id} style={{
+                          padding: "12px 14px",
+                          background: "color-mix(in oklch, var(--success) 6%, var(--surface))",
+                          border: "1px solid color-mix(in oklch, var(--success) 20%, var(--border))",
+                          borderRadius: "var(--cs-radius-lg)",
+                        }}>
+                          {/* Site + time */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--success)" }}>
+                                {h.site_name ?? `Site ${h.site_id}`}
+                              </div>
+                              {isSimulated && (
+                                <span className="cs-pill cs-pill--muted" style={{ fontSize: 10 }}>Simulated</span>
+                              )}
+                            </div>
+                            <div className="cs-mono cs-muted" style={{ fontSize: 10.5 }}>{timeAgo(h.created_at)}</div>
+                          </div>
+
+                          {/* Dates */}
+                          {h.arrive_date && h.depart_date && (
+                            <div style={{ fontSize: 12.5, marginBottom: 10, color: "var(--ink-2)" }}>
+                              {new Date(h.arrive_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              {" → "}
+                              {new Date(h.depart_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              {nights !== null && <span className="cs-muted"> · {nights}n</span>}
+                            </div>
+                          )}
+
+                          {/* Book button */}
+                          {bookingUrl ? (
+                            <a
+                              href={bookingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 6,
+                                padding: "7px 12px", fontSize: 12, fontWeight: 600,
+                                background: "var(--success)", color: "#fff",
+                                borderRadius: "var(--cs-radius)", textDecoration: "none",
+                              }}
+                            >
+                              Book on Recreation.gov →
+                            </a>
+                          ) : (
+                            <span className="cs-muted" style={{ fontSize: 11.5 }}>No booking link</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+
+            /* ── Default alert detail panel ── */
+            !activeAlert ? (
               <p className="cs-muted" style={{ fontSize: 13 }}>Select an alert to see details.</p>
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                   <div>
                     <div className="cs-label" style={{ marginBottom: 6 }}>{activeAlert.campgrounds?.park}</div>
-                    <h3 style={{ fontSize: 22 }}>{activeAlert.campgrounds?.name ?? activeAlert.campground_id}</h3>
+                    <Link href={`/campgrounds/${activeAlert.campground_id}`}>
+                      <h3 style={{ fontSize: 22, color: "var(--primary)" }}>{activeAlert.campgrounds?.name ?? activeAlert.campground_id}</h3>
+                    </Link>
                   </div>
                   <button className="cs-btn cs-btn--quiet cs-btn--sm" onClick={() => router.push(`/campgrounds/${activeAlert.campground_id}/alert/new`)}>
                     <Icon name="settings" size={14} />
@@ -343,7 +648,7 @@ export default function DashboardPage() {
                   </button>
                 </div>
               </>
-            )}
+            ))}
           </div>
         </div>
       </div>
