@@ -2,4 +2,4 @@
 -- Existing integer values (e.g. {3}) are cast to their text equivalents (e.g. {'3'}).
 alter table alerts
   alter column site_ids type text[]
-  using array(select unnest(site_ids)::text);
+  using site_ids::text[];
