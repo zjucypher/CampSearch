@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -100,17 +100,34 @@ def process_alert(db: Client, alert: dict) -> None:
     if not hits:
         return
 
-    logger.info("HIT on alert %s: %d site(s) — %s",
-                alert_id, len(hits), ", ".join(h.get("site_name", "") for h in hits))
+    # Deduplicate: skip sites already notified within the last hour so a
+    # continuously-available site doesn't flood the activity log every 30s.
+    cooldown_cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    recent = db.table("alert_history")\
+        .select("site_name")\
+        .eq("alert_id", alert_id)\
+        .eq("event_type", "notified")\
+        .gte("created_at", cooldown_cutoff)\
+        .execute()
+    already_notified = {row["site_name"] for row in (recent.data or [])}
+    new_hits = [h for h in hits if h.get("site_name") not in already_notified]
+
+    if not new_hits:
+        logger.info("Alert %s: %d site(s) available but all already notified within 1h — skipping",
+                    alert_id, len(hits))
+        return
+
+    logger.info("HIT on alert %s: %d new site(s) — %s",
+                alert_id, len(new_hits), ", ".join(h.get("site_name", "") for h in new_hits))
 
     # Update hit counter — keep status as "monitoring" so the alert keeps running
     db.table("alerts").update({
-        "hits": (alert.get("hits") or 0) + len(hits),
+        "hits": (alert.get("hits") or 0) + len(new_hits),
         "last_hit_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", alert_id).execute()
 
-    # Write one history row per hit so every site appears in the dashboard
-    for hit in hits:
+    # Write one history row per new hit
+    for hit in new_hits:
         db.table("alert_history").insert({
             "alert_id": alert_id,
             "user_id": user_id,
@@ -122,8 +139,8 @@ def process_alert(db: Client, alert: dict) -> None:
             "detail": {"booking_url": hit.get("booking_url")},
         }).execute()
 
-    # Send a single notification for the first hit to avoid spam
-    first_hit = hits[0]
+    # Send a single notification for the first new hit to avoid spam
+    first_hit = new_hits[0]
     user_email = fetch_user_email(db, user_id)
     user_name = profile.get("full_name") or "Camper"
 
