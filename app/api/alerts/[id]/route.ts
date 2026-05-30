@@ -66,8 +66,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { supabase, user } = await getAuthedClient();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Fetch campground name before deleting so the history row can label itself
-  // after alert_id is set to NULL (ON DELETE SET NULL).
+  // Fetch campground name before deleting so history rows can still label
+  // themselves after alert_id is set to NULL (ON DELETE SET NULL).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: alertRow } = await (supabase.from("alerts") as any)
     .select("campgrounds(name)")
@@ -75,6 +75,25 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     .eq("user_id", user.id)
     .single();
   const campgroundName = (alertRow as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? null;
+
+  if (campgroundName) {
+    // Stamp campground_name into every existing history row for this alert so
+    // they can still be labelled after alert_id becomes NULL.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: rows } = await (supabase.from("alert_history") as any)
+      .select("id, detail")
+      .eq("alert_id", id);
+    if (rows?.length) {
+      await Promise.all(
+        (rows as { id: string; detail: Record<string, unknown> | null }[]).map((row) =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (supabase.from("alert_history") as any)
+            .update({ detail: { ...(row.detail ?? {}), campground_name: campgroundName } })
+            .eq("id", row.id)
+        )
+      );
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (supabase.from("alert_history") as any).insert({
