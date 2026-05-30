@@ -37,7 +37,7 @@ export interface Database {
           depart_date: string;
           flexibility: "exact" | "3d" | "week" | "wknd";
           site_mode: "specific" | "any";
-          site_ids: number[];
+          site_ids: string[];
           site_type: string | null;
           min_occupancy: number;
           amenity_filter: string[];
