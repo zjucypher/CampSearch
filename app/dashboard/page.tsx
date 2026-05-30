@@ -388,7 +388,7 @@ export default function DashboardPage() {
                               <span>
                                 <strong style={{ color: "var(--success)" }}>Site found</strong>
                                 {" — "}
-                                {(h.alerts as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? "Unknown"}
+                                {(h.alerts as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? (h.detail as { campground_name?: string } | null)?.campground_name ?? "Unknown"}
                                 {h.site_name ? <span className="cs-muted"> · {h.site_name}</span> : null}
                               </span>
                             ) : historyLabel(h)}
