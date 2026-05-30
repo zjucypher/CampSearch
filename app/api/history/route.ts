@@ -36,9 +36,8 @@ export async function GET(request: NextRequest) {
   if (alertId)   query = query.eq("alert_id", alertId);
   if (eventType) query = query.eq("event_type", eventType);
 
-  // Hide orphaned rows where alert_id is NULL but no campground_name was stamped
-  // into detail (i.e. rows from alerts deleted before the stamp-on-delete fix).
-  // Keep rows where alert_id IS NOT NULL, or detail->>'campground_name' is set.
+  // Exclude orphaned rows that have no campground_name in detail — these are
+  // rows from alerts deleted before the stamp-on-delete fix and can't be labelled.
   if (!alertId) {
     query = query.or("alert_id.not.is.null,detail->>campground_name.not.is.null");
   }

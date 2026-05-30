@@ -80,8 +80,9 @@ def process_alert(db: Client, alert: dict) -> None:
         logger.warning("Skipping alert %s — could not fetch user profile, will retry next cycle", alert_id)
         return
     campground = alert.get("campgrounds") or {}
+    campground_name = campground.get("name") or ""
 
-    logger.info("Checking alert %s — %s", alert_id, campground.get("name", "?"))
+    logger.info("Checking alert %s — %s", alert_id, campground_name or "?")
 
     # Mark last_checked_at immediately to prevent double-checking
     db.table("alerts").update(
@@ -93,7 +94,7 @@ def process_alert(db: Client, alert: dict) -> None:
         "alert_id": alert_id,
         "user_id": user_id,
         "event_type": "check",
-        "detail": {"ts": datetime.now(timezone.utc).isoformat()},
+        "detail": {"ts": datetime.now(timezone.utc).isoformat(), "campground_name": campground_name},
     }).execute()
 
     hits = check_alert(alert)
@@ -154,7 +155,7 @@ def process_alert(db: Client, alert: dict) -> None:
             "site_name": hit.get("site_name"),
             "arrive_date": hit.get("arrive_date"),
             "depart_date": hit.get("depart_date"),
-            "detail": {"booking_url": hit.get("booking_url")},
+            "detail": {"booking_url": hit.get("booking_url"), "campground_name": campground_name},
         }).execute()
 
     # Send a single notification for the first new hit to avoid spam

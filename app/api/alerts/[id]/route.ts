@@ -40,21 +40,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .update(patch)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select()
+    .select("*, campgrounds(name)")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Record status transitions in activity history
-  if (patch.status === "monitoring") {
+  // Record status transitions in activity history, including campground_name in
+  // detail so rows remain labellable if the alert is later deleted.
+  if (patch.status === "monitoring" || patch.status === "paused") {
+    const campgroundName =
+      (data as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (supabase.from("alert_history") as any).insert({
-      alert_id: id, user_id: user.id, event_type: "resumed",
-    });
-  } else if (patch.status === "paused") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase.from("alert_history") as any).insert({
-      alert_id: id, user_id: user.id, event_type: "paused",
+      alert_id: id,
+      user_id: user.id,
+      event_type: patch.status === "monitoring" ? "resumed" : "paused",
+      detail: campgroundName ? { campground_name: campgroundName } : null,
     });
   }
 
