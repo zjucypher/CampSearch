@@ -66,10 +66,20 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { supabase, user } = await getAuthedClient();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Record deletion before the row is removed (cascade will wipe history otherwise)
+  // Fetch campground name before deleting so the history row can label itself
+  // after alert_id is set to NULL (ON DELETE SET NULL).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: alertRow } = await (supabase.from("alerts") as any)
+    .select("campgrounds(name)")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+  const campgroundName = (alertRow as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? null;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (supabase.from("alert_history") as any).insert({
     alert_id: id, user_id: user.id, event_type: "deleted",
+    detail: campgroundName ? { campground_name: campgroundName } : null,
   });
 
   const { error } = await supabase

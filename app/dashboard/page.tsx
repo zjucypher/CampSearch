@@ -178,7 +178,10 @@ export default function DashboardPage() {
   ];
 
   function historyLabel(h: HistoryRow) {
-    const name = (h.alerts as { campgrounds?: { name?: string } } | null)?.campgrounds?.name ?? "Unknown";
+    const detail = h.detail as { campground_name?: string } | null;
+    const name = (h.alerts as { campgrounds?: { name?: string } } | null)?.campgrounds?.name
+      ?? detail?.campground_name
+      ?? "Unknown";
     if (h.event_type === "notified") return `Hit at ${name} — site ${h.site_name ?? h.site_id}`;
     if (h.event_type === "paused") return `Alert paused — ${name}`;
     if (h.event_type === "resumed") return `Alert resumed — ${name}`;

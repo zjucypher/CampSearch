@@ -72,7 +72,7 @@ export interface Database {
       alert_history: {
         Row: {
           id: string;
-          alert_id: string;
+          alert_id: string | null;
           user_id: string;
           event_type: "check" | "hit" | "notified" | "paused" | "resumed" | "deleted";
           site_id: number | null;
