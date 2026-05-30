@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 
@@ -10,26 +9,33 @@ export type CampsiteAvailability = {
   avail: Record<string, boolean>; // "YYYY-MM-DD" → true=Available
 };
 
-// Recreation.gov blocks Node.js undici's TLS fingerprint with HTTP 400.
-// curl uses OpenSSL directly (different JA3 fingerprint) and is accepted.
-// It is available on Vercel's Lambda (Amazon Linux) and local macOS/Linux.
-function curlGet(url: string, params: Record<string, string>): Promise<string> {
+// Recreation.gov blocks Vercel's Lambda (AWS IP range) with HTTP 400.
+// Requests are routed through the Railway worker which uses Python requests
+// from a non-AWS IP. RAILWAY_PROXY_URL points to the Railway service's
+// public domain; PROXY_SECRET authenticates each request.
+const PROXY_URL = (process.env.RAILWAY_PROXY_URL ?? "").replace(/\/$/, "");
+const PROXY_SECRET = process.env.PROXY_SECRET ?? "";
+
+async function proxyGet(path: "availability" | "search", params: Record<string, string>): Promise<unknown> {
+  if (!PROXY_URL) {
+    console.error("[availability] RAILWAY_PROXY_URL is not configured");
+    return null;
+  }
   const qs = new URLSearchParams(params).toString();
-  return new Promise((resolve) => {
-    const proc = spawn("curl", [
-      "-s",
-      "--max-time", "15",
-      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      `${url}?${qs}`,
-    ]);
-    let out = "";
-    let err = "";
-    proc.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); });
-    proc.stderr.on("data", (chunk: Buffer) => { err += chunk.toString(); });
-    const timer = setTimeout(() => { proc.kill(); resolve(""); }, 20_000);
-    proc.on("close", () => { clearTimeout(timer); if (err) console.error("curl:", err.trim()); resolve(out.trim()); });
-    proc.on("error", () => { clearTimeout(timer); resolve(""); });
-  });
+  try {
+    const res = await fetch(`${PROXY_URL}/${path}?${qs}`, {
+      headers: { "X-Proxy-Secret": PROXY_SECRET },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      console.error(`[availability] proxy ${path} returned HTTP ${res.status}`);
+      return null;
+    }
+    return res.json();
+  } catch (err) {
+    console.error(`[availability] proxy ${path} fetch error:`, err);
+    return null;
+  }
 }
 
 function serviceDb() {
@@ -66,18 +72,9 @@ export async function GET(
 
   let facilityId = campground.rec_area_id ? String(campground.rec_area_id) : "";
 
-  // Fall back to a live Recreation.gov search if we don't have the facility ID stored
   if (!facilityId) {
-    const raw = await curlGet("https://www.recreation.gov/api/search", {
-      q: campground.name,
-      entity_type: "campground",
-      exact: "false",
-    });
-    try {
-      const results = JSON.parse(raw)?.results ?? [];
-      facilityId = results[0]?.entity_id ? String(results[0].entity_id) : "";
-    } catch { /* leave empty */ }
-
+    const data = await proxyGet("search", { q: campground.name }) as { results?: Array<{ entity_id: string }> } | null;
+    facilityId = data?.results?.[0]?.entity_id ? String(data.results[0].entity_id) : "";
     if (facilityId) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (serviceDb().from("campgrounds") as any)
@@ -102,18 +99,15 @@ export async function GET(
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
 
-  // Fetch availability for each month and merge into a single campsites map
   const campsites: Record<string, CampsiteAvailability> = {};
 
   await Promise.all([...months].map(async (month) => {
-    const raw = await curlGet(
-      `https://www.recreation.gov/api/camps/availability/campground/${facilityId}/month`,
-      { start_date: `${month}T00:00:00.000Z` }
-    );
-    let data: Record<string, unknown>;
-    try { data = JSON.parse(raw); } catch { return; }
+    const data = await proxyGet("availability", { facility_id: facilityId, month }) as {
+      campsites?: Record<string, Record<string, unknown>>;
+    } | null;
+    if (!data?.campsites) return;
 
-    for (const [cid, info] of Object.entries(data.campsites as Record<string, Record<string, unknown>> ?? {})) {
+    for (const [cid, info] of Object.entries(data.campsites)) {
       if (!campsites[cid]) {
         campsites[cid] = {
           site: (info.site as string) || cid,
