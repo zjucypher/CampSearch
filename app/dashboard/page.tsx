@@ -84,33 +84,41 @@ export default function DashboardPage() {
       .finally(() => setHitsLoading(false));
   }, [hitsAlertId]);
 
-  // Supabase Realtime — refresh on any activity or alert status change
+  // Supabase Realtime — refresh on any activity or alert status change.
+  // user_id filter is required on RLS-enabled tables so the server knows
+  // which rows to deliver; without it only filtered subscriptions work.
   useEffect(() => {
     const supabase = getSupabase();
-    const channel = supabase
-      .channel("dashboard-live")
-      // Any new history entry (check, notified, paused, resumed) → refresh activity feed
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "alert_history" },
-        (payload) => {
-          const row = payload.new as HistoryRow;
-          if (row.event_type === "notified") {
-            const alert = alerts.find((a) => a.id === row.alert_id);
-            setToastCampground(alert?.campgrounds?.name ?? "A campsite");
-            setToastOpen(true);
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      channel = supabase
+        .channel("dashboard-live")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "alert_history",
+            filter: `user_id=eq.${user.id}` },
+          (payload) => {
+            const row = payload.new as HistoryRow;
+            if (row.event_type === "notified") {
+              const alert = alerts.find((a) => a.id === row.alert_id);
+              setToastCampground(alert?.campgrounds?.name ?? "A campsite");
+              setToastOpen(true);
+            }
+            fetchData();
           }
-          fetchData();
-        }
-      )
-      // Any alert UPDATE (status → paused, hits counter, last_checked_at) → refresh cards
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "alerts" },
-        () => { fetchData(); }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "alerts",
+            filter: `user_id=eq.${user.id}` },
+          () => { fetchData(); }
+        )
+        .subscribe();
+    });
+
+    return () => { if (channel) supabase.removeChannel(channel); };
   }, [alerts, fetchData]);
 
   async function handlePauseResume(alert: Alert) {
