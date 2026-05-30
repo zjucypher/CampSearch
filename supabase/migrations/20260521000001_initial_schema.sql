@@ -41,7 +41,7 @@ create table if not exists alerts (
   -- Site filter
   site_mode       text not null default 'any'
                     check (site_mode in ('specific','any')),
-  site_ids        integer[] not null default '{}',
+  site_ids        text[] not null default '{}',
   site_type       text,
   min_occupancy   integer not null default 1,
   amenity_filter  text[] not null default '{}',
