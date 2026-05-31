@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -186,6 +187,12 @@ def run_cycle(db: Client) -> None:
 
 def main() -> None:
     logger.info("CampSearch worker starting")
+
+    # Start the Flask proxy server in a daemon thread so Vercel can route
+    # Recreation.gov requests through this non-AWS IP (Vercel Lambda is blocked).
+    from server import start_server
+    threading.Thread(target=start_server, daemon=True, name="proxy-server").start()
+
     db = get_db()
 
     while True:
