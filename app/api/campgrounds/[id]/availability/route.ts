@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 
+export const runtime = "edge";
+
 export type CampsiteAvailability = {
   site: string;
   loop: string;
@@ -9,31 +11,26 @@ export type CampsiteAvailability = {
   avail: Record<string, boolean>; // "YYYY-MM-DD" → true=Available
 };
 
-// Recreation.gov blocks Vercel's Lambda (AWS IP range) with HTTP 400.
-// Requests are routed through the Railway worker which uses Python requests
-// from a non-AWS IP. RAILWAY_PROXY_URL points to the Railway service's
-// public domain; PROXY_SECRET authenticates each request.
-const PROXY_URL = (process.env.RAILWAY_PROXY_URL ?? "").replace(/\/$/, "");
-const PROXY_SECRET = process.env.PROXY_SECRET ?? "";
+const REC_GOV = "https://www.recreation.gov";
+const REC_GOV_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+};
 
-async function proxyGet(path: "availability" | "search", params: Record<string, string>): Promise<unknown> {
-  if (!PROXY_URL) {
-    console.error("[availability] RAILWAY_PROXY_URL is not configured");
-    return null;
-  }
+async function recGovGet(path: string, params: Record<string, string>): Promise<unknown> {
   const qs = new URLSearchParams(params).toString();
   try {
-    const res = await fetch(`${PROXY_URL}/${path}?${qs}`, {
-      headers: { "X-Proxy-Secret": PROXY_SECRET },
+    const res = await fetch(`${REC_GOV}${path}?${qs}`, {
+      headers: REC_GOV_HEADERS,
       signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
-      console.error(`[availability] proxy ${path} returned HTTP ${res.status}`);
+      console.error(`[availability] Recreation.gov ${path} returned HTTP ${res.status}`);
       return null;
     }
     return res.json();
   } catch (err) {
-    console.error(`[availability] proxy ${path} fetch error:`, err);
+    console.error(`[availability] Recreation.gov fetch error:`, err);
     return null;
   }
 }
@@ -73,7 +70,7 @@ export async function GET(
   let facilityId = campground.rec_area_id ? String(campground.rec_area_id) : "";
 
   if (!facilityId) {
-    const data = await proxyGet("search", { q: campground.name }) as { results?: Array<{ entity_id: string }> } | null;
+    const data = await recGovGet("/api/search", { q: campground.name, entity_type: "campground", exact: "false" }) as { results?: Array<{ entity_id: string }> } | null;
     facilityId = data?.results?.[0]?.entity_id ? String(data.results[0].entity_id) : "";
     if (facilityId) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,9 +99,10 @@ export async function GET(
   const campsites: Record<string, CampsiteAvailability> = {};
 
   await Promise.all([...months].map(async (month) => {
-    const data = await proxyGet("availability", { facility_id: facilityId, month }) as {
-      campsites?: Record<string, Record<string, unknown>>;
-    } | null;
+    const data = await recGovGet(
+      `/api/camps/availability/campground/${facilityId}/month`,
+      { start_date: `${month}T00:00:00.000Z` }
+    ) as { campsites?: Record<string, Record<string, unknown>> } | null;
     if (!data?.campsites) return;
 
     for (const [cid, info] of Object.entries(data.campsites)) {

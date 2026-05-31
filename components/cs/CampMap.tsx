@@ -97,7 +97,7 @@ export default function CampMap({ campgrounds, activeId, onSelect, height = 460 
         layout: {
           "text-field": ["get", "label"],
           "text-size": ["case", ["==", ["get", "active"], 1], 12, 10],
-          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-font": ["Noto Sans Bold"],
           "text-allow-overlap": true,
           "text-ignore-placement": true,
         },

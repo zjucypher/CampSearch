@@ -56,7 +56,7 @@ export default function LandingPage() {
               style={{ borderRadius: "var(--cs-radius-lg)" }}
             />
             <div className="cs-card" style={{
-              position: "absolute", bottom: -28, right: -16,
+              position: "absolute", bottom: -28, right: -16, zIndex: 1,
               padding: 14, width: 280,
               display: "flex", gap: 12, alignItems: "flex-start",
             }}>
